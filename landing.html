@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexTalk — Децентрализованный мессенджер</title>
+  <meta name="description" content="NexTalk — защищённый мессенджер с E2E-шифрованием и децентрализованной передачей сообщений через независимые узлы.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="landing-body">
+
+  <!-- NAV -->
+  <nav class="nav" id="mainNav">
+    <div class="nav-logo">
+      <div class="logo-icon">💬</div>
+      <span>Nex<em>Talk</em></span>
+    </div>
+    <div class="nav-links">
+      <a href="#features" class="nav-link">Возможности</a>
+      <a href="#how" class="nav-link">Как это работает</a>
+      <a href="#nodes" class="nav-link">Узлы</a>
+      <button class="theme-toggle" id="themeToggle" title="Переключить тему">🌙</button>
+      <a href="login.php" class="btn btn-ghost" style="margin-left:8px">Войти</a>
+      <a href="register.php" class="btn btn-primary">Регистрация</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-badge">
+      🔒 End-to-end шифрование · Открытый протокол
+    </div>
+    <h1>
+      Мессенджер, где<br>
+      <span class="gradient-text">никто не читает</span><br>
+      ваши сообщения
+    </h1>
+    <p class="hero-desc">
+      Авторизация через единый центр, а сами сообщения передаются через независимые узлы сети — разверните свой или используйте публичный.
+    </p>
+    <div class="hero-actions">
+      <a href="register.php" class="btn btn-primary btn-lg">
+        Начать бесплатно →
+      </a>
+      <a href="#how" class="btn btn-ghost btn-lg">
+        Как это работает
+      </a>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <div class="section-label">Возможности</div>
+    <h2 class="section-title">Всё, что нужно для приватного общения</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🔐</div>
+        <h3>E2E-шифрование</h3>
+        <p>Сообщения шифруются прямо на вашем устройстве. Ни узлы, ни серверы не могут прочитать содержимое переписки — только вы и ваш собеседник.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🌐</div>
+        <h3>Децентрализованные узлы</h3>
+        <p>Сообщения передаются через независимые узлы-ноды. Любой может поднять свой узел — отказ одного не затрагивает остальных.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>WebSocket в реальном времени</h3>
+        <p>Мгновенная доставка сообщений через постоянное соединение. Индикатор набора текста, статусы онлайн, мгновенные уведомления.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🗝️</div>
+        <h3>Ключи только у вас</h3>
+        <p>Криптографические ключи генерируются на клиенте и хранятся только на вашем устройстве в IndexedDB. Мы физически не можем их получить.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📱</div>
+        <h3>Любое устройство</h3>
+        <p>Работает в браузере без плагинов. Chrome, Firefox, Edge, Safari. Мобильная адаптация от 320 пикселей.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📨</div>
+        <h3>Очередь офлайн-сообщений</h3>
+        <p>Если получатель офлайн — узел временно сохраняет зашифрованное сообщение и доставит его при следующем подключении.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how-it-works" id="how">
+    <div class="section-label">Принцип работы</div>
+    <h2 class="section-title">Как передаются сообщения</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>Авторизация на центральном сервере</h3>
+          <p>Вы регистрируетесь и входите через сервер авторизации. Он выдаёт JWT-токен и хранит ваш публичный ключ. Приватный ключ остаётся только у вас.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>Выбор узла передачи</h3>
+          <p>Из реестра публичных узлов выбираете нужный — или подключаетесь к своему собственному. Узел проверяет ваш токен офлайн, без обращения к серверу авторизации.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>Шифрование на вашем устройстве</h3>
+          <p>Перед отправкой сообщение шифруется публичным ключом собеседника (Web Crypto API). Узел видит только зашифрованные данные.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <h3>Маршрутизация через узел</h3>
+          <p>Узел пересылает зашифрованный blob получателю — напрямую, если оба на одном узле, или через узел-к-узлу, если на разных.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- NODE BANNER -->
+  <div class="node-banner" id="nodes">
+    <div class="node-banner-text">
+      <h2>🚀 Запустите свой узел</h2>
+      <p>Любой желающий может поднять собственный узел передачи сообщений — на своём VPS, домашнем сервере или даже ноутбуке. Не нужны права администратора, не нужен выделенный порт — только Node.js.</p>
+      <br>
+      <a href="node/server.js" class="btn btn-primary" style="display:inline-flex">
+        📥 Скачать сервер узла
+      </a>
+    </div>
+    <div class="node-banner-code">
+      <div style="color: #5A5B7F; margin-bottom: 8px;"># Запуск узла (порт 3001)</div>
+      node server.js<br>
+      <br>
+      <div style="color: #5A5B7F; margin-bottom: 8px;"># Или на другом порту</div>
+      node server.js 8080<br>
+      <br>
+      <div style="color: #5A5B7F; margin-bottom: 8px;"># Статус узла</div>
+      http://localhost:3001/health
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="nav-logo">
+      <div class="logo-icon" style="width:28px;height:28px;font-size:14px;border-radius:8px">💬</div>
+      <span>Nex<em>Talk</em></span>
+    </div>
+    <p>© 2026 NexTalk. Децентрализованный мессенджер с открытым протоколом.</p>
+    <div style="display:flex;gap:16px">
+      <a href="#">Политика конфиденциальности</a>
+      <a href="#">Документация</a>
+    </div>
+  </footer>
+
+  <script>
+    // Smooth scroll for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', e => {
+        e.preventDefault();
+        const target = document.querySelector(a.getAttribute('href'));
+        if (target) target.scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+
+    // Theme toggle
+    const themeToggle = document.getElementById('themeToggle');
+    const html = document.documentElement;
+
+    const saved = localStorage.getItem('nt-theme') || 'dark';
+    html.setAttribute('data-theme', saved);
+    themeToggle.textContent = saved === 'dark' ? '🌙' : '☀️';
+
+    themeToggle.addEventListener('click', () => {
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('nt-theme', next);
+      themeToggle.textContent = next === 'dark' ? '🌙' : '☀️';
+    });
+
+    // Nav scroll shadow
+    window.addEventListener('scroll', () => {
+      const nav = document.getElementById('mainNav');
+      nav.style.boxShadow = window.scrollY > 20
+        ? '0 4px 30px rgba(0,0,0,0.3)'
+        : '';
+    });
+  </script>
+</body>
+</html>
