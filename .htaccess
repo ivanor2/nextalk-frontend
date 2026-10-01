@@ -1,0 +1,29 @@
+# ── Security: Block test/debug files ─────────────────────
+<Files "test.php">
+    Require ip 127.0.0.1 ::1
+</Files>
+
+<Files "test_chats.php">
+    Require ip 127.0.0.1 ::1
+</Files>
+
+# ── Security: Block sensitive files ──────────────────────
+<Files ".env">
+    Require all denied
+</Files>
+
+<Files ".env.example">
+    Require all denied
+</Files>
+
+<Files "db.php">
+    Require all denied
+</Files>
+
+# ── Security Headers ─────────────────────────────────────
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

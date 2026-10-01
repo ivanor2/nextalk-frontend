@@ -422,7 +422,7 @@ async function pingLocalNode() {
   const pingEl = document.getElementById('localNodePing');
   try {
     const t = Date.now();
-    const resp = await fetch('http://localhost:3001/health');
+    const resp = await fetch('https://dry-chicken-87.loca.lt');
     const ms = Date.now() - t;
     if (resp.ok) {
       pingEl.textContent = ms + ' ms';
