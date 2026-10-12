@@ -1,5 +1,5 @@
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/../src/Bootstrap.php';
 $response = callNodeApi('POST', '/auth/login', [
     'username' => 'test1',
     'password' => '123456'

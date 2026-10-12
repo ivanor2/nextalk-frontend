@@ -1,5 +1,5 @@
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/src/Bootstrap.php';
 
     // Node API could handle status update, but for now we just destroy session
 session_destroy();

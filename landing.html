@@ -18,7 +18,9 @@
     <div class="nav-links">
       <a href="#features" class="nav-link">Возможности</a>
       <a href="#how" class="nav-link">Как это работает</a>
-      <a href="#nodes" class="nav-link">Узлы</a>
+      <a href="nodes.php" class="nav-link">Каталог узлов</a>
+      <a href="install.php" class="nav-link">Установка узла</a>
+      <a href="rules.php" class="nav-link">Правила</a>
       <button class="theme-toggle" id="themeToggle" title="Переключить тему">🌙</button>
       <a href="login.php" class="btn btn-ghost" style="margin-left:8px">Войти</a>
       <a href="register.php" class="btn btn-primary">Регистрация</a>
@@ -42,9 +44,53 @@
       <a href="register.php" class="btn btn-primary btn-lg">
         Начать бесплатно →
       </a>
-      <a href="#how" class="btn btn-ghost btn-lg">
-        Как это работает
+      <a href="install.php" class="btn btn-ghost btn-lg">
+        🚀 Установить свой узел
       </a>
+    </div>
+  </section>
+
+  <!-- PUBLIC NODES SECTION (ТЗ 8.1) -->
+  <section class="features" id="nodes-preview" style="padding-top:40px;padding-bottom:40px">
+    <div class="section-label">Сетевая инфраструктура</div>
+    <h2 class="section-title">Публичные узлы передачи</h2>
+    <p style="text-align:center;color:var(--text-secondary);max-width:600px;margin:0 auto 28px;font-size:15px">
+      Вы можете подключиться к любому действующему узлу сети или переключить его в настройках в любой момент.
+    </p>
+    <div class="table-wrap" style="max-width:900px;margin:0 auto">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Узел</th>
+            <th>Адрес</th>
+            <th>Пользователи</th>
+            <th>Статус</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>node-one (Основной)</strong></td>
+            <td><code>wss://nextalk-dev.loca.lt</code></td>
+            <td>142 польз.</td>
+            <td><span class="badge-status badge-active">● Онлайн</span></td>
+          </tr>
+          <tr>
+            <td><strong>local-node (Локальный)</strong></td>
+            <td><code>ws://127.0.0.1:3001</code></td>
+            <td>18 польз.</td>
+            <td><span class="badge-status badge-active">● Онлайн</span></td>
+          </tr>
+          <tr>
+            <td><strong>campus-hub (Университет)</strong></td>
+            <td><code>wss://campus.nextalk.net</code></td>
+            <td>35 польз.</td>
+            <td><span class="badge-status badge-pending">○ На проверке</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="text-align:center;margin-top:20px">
+      <a href="nodes.php" class="btn btn-ghost">Все узлы каталога →</a>
     </div>
   </section>
 
@@ -94,8 +140,8 @@
       <div class="step">
         <div class="step-num">1</div>
         <div class="step-body">
-          <h3>Авторизация на центральном сервере</h3>
-          <p>Вы регистрируетесь и входите через сервер авторизации. Он выдаёт JWT-токен и хранит ваш публичный ключ. Приватный ключ остаётся только у вас.</p>
+          <h3>Регистрация на центральном сервере</h3>
+          <p>Вы регистрируетесь и входите через сервер авторизации. Он выдаёт JWT-токен и хранит ваш публичный ключ. Закрытый ключ остаётся только у вас.</p>
         </div>
       </div>
       <div class="step">
@@ -108,15 +154,8 @@
       <div class="step">
         <div class="step-num">3</div>
         <div class="step-body">
-          <h3>Шифрование на вашем устройстве</h3>
+          <h3>Шифрование и общение</h3>
           <p>Перед отправкой сообщение шифруется публичным ключом собеседника (Web Crypto API). Узел видит только зашифрованные данные.</p>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-num">4</div>
-        <div class="step-body">
-          <h3>Маршрутизация через узел</h3>
-          <p>Узел пересылает зашифрованный blob получателю — напрямую, если оба на одном узле, или через узел-к-узлу, если на разных.</p>
         </div>
       </div>
     </div>
@@ -126,20 +165,17 @@
   <div class="node-banner" id="nodes">
     <div class="node-banner-text">
       <h2>🚀 Запустите свой узел</h2>
-      <p>Любой желающий может поднять собственный узел передачи сообщений — на своём VPS, домашнем сервере или даже ноутбуке. Не нужны права администратора, не нужен выделенный порт — только Node.js.</p>
+      <p>Любой желающий может поднять собственный узел передачи сообщений — на своём VPS, домашнем сервере или даже ноутбуке. Не нужны права администратора, не нужен выделенный сервер БД — только Node.js.</p>
       <br>
-      <a href="node/server.js" class="btn btn-primary" style="display:inline-flex">
-        📥 Скачать сервер узла
+      <a href="install.php" class="btn btn-primary" style="display:inline-flex">
+        📖 Пошаговая инструкция и заявка →
       </a>
     </div>
     <div class="node-banner-code">
       <div style="color: #5A5B7F; margin-bottom: 8px;"># Запуск узла (порт 3001)</div>
-      node server.js<br>
+      npm start<br>
       <br>
-      <div style="color: #5A5B7F; margin-bottom: 8px;"># Или на другом порту</div>
-      node server.js 8080<br>
-      <br>
-      <div style="color: #5A5B7F; margin-bottom: 8px;"># Статус узла</div>
+      <div style="color: #5A5B7F; margin-bottom: 8px;"># Проверка статуса</div>
       http://localhost:3001/health
     </div>
   </div>
@@ -150,10 +186,11 @@
       <div class="logo-icon" style="width:28px;height:28px;font-size:14px;border-radius:8px">💬</div>
       <span>Nex<em>Talk</em></span>
     </div>
-    <p>© 2026 NexTalk. Децентрализованный мессенджер с открытым протоколом.</p>
-    <div style="display:flex;gap:16px">
-      <a href="#">Политика конфиденциальности</a>
-      <a href="#">Документация</a>
+    <p>© 2026 NexTalk. Децентрализованный веб-мессенджер без единого владельца.</p>
+    <div style="display:flex;gap:20px">
+      <a href="nodes.php">Каталог узлов</a>
+      <a href="install.php">Инструкция по установке</a>
+      <a href="rules.php">Правила и политика</a>
     </div>
   </footer>
 

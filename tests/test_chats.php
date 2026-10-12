@@ -1,5 +1,5 @@
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/../src/Bootstrap.php';
 // Mock session for test
 $_SESSION['user_id'] = 6;
 $_SESSION['username'] = 'test_search';
