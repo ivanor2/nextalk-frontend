@@ -22,6 +22,61 @@ class Helpers {
         return AUTH_API_URL . '/' . ltrim($path, '/');
     }
 
+    public static function formatBytes(int $bytes): string {
+        if ($bytes < 1024) return $bytes . ' B';
+        if ($bytes < 1048576) return number_format($bytes / 1024, 1, '.', '') . ' KB';
+        return number_format($bytes / 1048576, 1, '.', '') . ' MB';
+    }
+
+    public static function renderMessageBubble(?string $content): string {
+        $content = $content ?? '';
+        $trimmed = trim($content);
+
+        if (preg_match('/^\[attachment:(\{.*\})\]$/s', $trimmed, $matches)) {
+            $data = json_decode($matches[1], true);
+            if (is_array($data) && !empty($data['url'])) {
+                $url = self::e($data['url']);
+                $filename = self::e($data['filename'] ?? 'файл');
+                $size = (int)($data['size'] ?? 0);
+                $sizeStr = self::formatBytes($size);
+                $isImage = !empty($data['is_image']);
+
+                if ($isImage) {
+                    return '<a href="' . $url . '" target="_blank" rel="noopener">' .
+                           '<img src="' . $url . '" class="img-attachment" alt="' . $filename . '">' .
+                           '</a>' .
+                           '<div class="file-desc-sub">' . $filename . ' (' . $sizeStr . ')</div>';
+                } else {
+                    return '<a href="' . $url . '" target="_blank" download="' . $filename . '" class="file-attachment-card">' .
+                           '<div class="file-icon">📄</div>' .
+                           '<div class="file-details">' .
+                           '<div class="file-name">' . $filename . '</div>' .
+                           '<div class="file-size">' . $sizeStr . ' · Нажмите чтобы скачать</div>' .
+                           '</div>' .
+                           '</a>';
+                }
+            }
+        }
+
+        return nl2br(self::e($content));
+    }
+
+    public static function formatPreview(?string $content): string {
+        if (!$content) return 'Нет сообщений';
+        $trimmed = trim($content);
+        if (str_starts_with($trimmed, '[attachment:')) {
+            if (preg_match('/^\[attachment:(\{.*\})\]$/s', $trimmed, $matches)) {
+                $data = json_decode($matches[1], true);
+                if (is_array($data) && !empty($data['filename'])) {
+                    $icon = !empty($data['is_image']) ? '🖼️ ' : '📎 ';
+                    return $icon . $data['filename'];
+                }
+            }
+            return '📎 Вложение';
+        }
+        return $content;
+    }
+
     public static function json($data, int $code = 200): void {
         http_response_code($code);
         header('Content-Type: application/json; charset=utf-8');

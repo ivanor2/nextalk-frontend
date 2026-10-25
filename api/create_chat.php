@@ -10,9 +10,12 @@ if ($otherId <= 0 || $otherId == $userId) {
     exit;
 }
 
-$response = ApiClient::callNode('POST', '/chats', [
-    'target_user_id' => $otherId
-]);
+$payload = ['target_user_id' => $otherId];
+$otherUsername = trim($_POST['username'] ?? '');
+if ($otherUsername !== '') {
+    $payload['target_username'] = $otherUsername;
+}
+$response = ApiClient::callNode('POST', '/chats', $payload);
 
 if (isset($response['ok']) && $response['ok']) {
     $chatId = $response['chat_id'];

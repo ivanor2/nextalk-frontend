@@ -78,3 +78,81 @@ document.addEventListener('keydown', e => {
         if (cmdOverlay) cmdOverlay.classList.remove('open');
     }
 });
+
+// ── Global Realtime & Background Notifier (for pages other than chat.php and index.php) ──
+(function initGlobalNotifier() {
+    document.addEventListener('DOMContentLoaded', () => {
+        // Only run on pages that have the sidebarChatsBadge and do NOT run their own chat/index WebSocket
+        if (window.CHAT_CONFIG || document.getElementById('chatList') || !document.getElementById('sidebarChatsBadge')) {
+            return;
+        }
+
+        async function checkGlobalUnread() {
+            try {
+                const resp = await fetch('api/get_chats.php?t=' + Date.now());
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (data.ok && Array.isArray(data.chats)) {
+                    const total = data.total_unread != null
+                        ? parseInt(data.total_unread, 10)
+                        : data.chats.reduce((sum, c) => sum + parseInt(c.unread_count || 0, 10), 0);
+
+                    const badge = document.getElementById('sidebarChatsBadge');
+                    if (badge) {
+                        if (total > 0) {
+                            badge.textContent = String(total);
+                            badge.classList.remove('d-none');
+                        } else {
+                            badge.textContent = '0';
+                            badge.classList.add('d-none');
+                        }
+                    }
+                    const baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
+                    document.title = total > 0 ? `(${total}) ${baseTitle}` : baseTitle;
+                }
+            } catch (e) {}
+        }
+
+        checkGlobalUnread();
+        setInterval(checkGlobalUnread, 4000);
+        window.addEventListener('focus', checkGlobalUnread);
+
+        // Connect to WebSocket for instant notifications on secondary pages
+        if (window.APP_CONFIG || window.CHAT_CONFIG) {
+            return;
+        }
+
+        const cachedWs = localStorage.getItem('nt-node') || 'ws://127.0.0.1:3001';
+        let wsUrl = cachedWs;
+        if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
+            wsUrl = wsUrl.replace(/^ws:\/\//, 'wss://');
+        }
+
+        fetch('api/token.php')
+            .then(r => r.json())
+            .then(data => {
+                if (!data.ok || !data.token) return;
+                try {
+                    const gws = new WebSocket(wsUrl);
+                    gws.addEventListener('open', () => {
+                        gws.send(JSON.stringify({ type: 'auth', token: data.token }));
+                    });
+                    gws.addEventListener('message', e => {
+                        try {
+                            const m = JSON.parse(e.data);
+                            if (m.type === 'message') {
+                                showToast(`💬 ${m.sender}: ${String(m.content).substring(0, 30)}`, 'info');
+                                checkGlobalUnread();
+                            }
+                        } catch (err) {}
+                    });
+                    setInterval(() => {
+                        if (gws.readyState === WebSocket.OPEN) {
+                            gws.send(JSON.stringify({ type: 'ping' }));
+                        }
+                    }, 30000);
+                } catch (err) {}
+            })
+            .catch(() => {});
+    });
+})();
