@@ -1,3 +1,7 @@
 .env
+<<<<<<< HEAD
 /uploads
 
+=======
+uploads/
+>>>>>>> b3cbe235da3a893fc3169fdf1eaaf6fce2a87589

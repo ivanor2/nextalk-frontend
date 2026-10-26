@@ -2,6 +2,13 @@
 $activeTab = $activeTab ?? 'chats';
 $curUsername = $_SESSION['username'] ?? 'User';
 $curDisplayName = $_SESSION['display_name'] ?? $curUsername;
+
+// Получаем число непрочитанных для бейджа "Чаты"
+$sidebarTotalUnread = 0;
+if (function_exists('callNodeApi')) {
+    $sidebarResp = callNodeApi('GET', '/chats');
+    $sidebarTotalUnread = (int)($sidebarResp['total_unread'] ?? 0);
+}
 ?>
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-top">
@@ -28,7 +35,10 @@ $curDisplayName = $_SESSION['display_name'] ?? $curUsername;
         <a href="index.php" class="chat-item <?= $activeTab === 'chats' ? 'active' : '' ?>">
             <span class="sidebar-icon">💬</span>
             <div class="chat-item-body">
-                <div class="chat-item-name">Чаты</div>
+                <div class="chat-item-name flex-between">
+                    <span>Чаты</span>
+                    <span class="unread-badge sidebar-chats-badge <?= $sidebarTotalUnread > 0 ? '' : 'd-none' ?>" id="sidebarChatsBadge"><?= $sidebarTotalUnread ?></span>
+                </div>
             </div>
         </a>
         <a href="contacts.php" class="chat-item <?= $activeTab === 'contacts' ? 'active' : '' ?>">

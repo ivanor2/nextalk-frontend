@@ -23,7 +23,14 @@ if (isset($contactsResp['ok']) && $contactsResp['ok']) {
 // Дефолтный WebSocket узел
 $defaultNode = defined('WS_NODE_URL') ? WS_NODE_URL : 'ws://127.0.0.1:3001';
 $userInit = mb_strtoupper(mb_substr($displayName, 0, 1));
-$pageTitle = 'NexTalk — Мессенджер';
+
+// Подсчёт общего числа непрочитанных
+$totalUnread = 0;
+foreach ($chats as $c) {
+    $totalUnread += (int)($c['unread_count'] ?? 0);
+}
+
+$pageTitle = ($totalUnread > 0 ? "($totalUnread) " : '') . 'NexTalk — Мессенджер';
 $metaDescription = 'NexTalk — децентрализованный мессенджер с E2E-шифрованием';
 require __DIR__ . '/templates/partials/head.php';
 ?>
@@ -79,7 +86,10 @@ require __DIR__ . '/templates/partials/head.php';
     <!-- Chat list -->
     <div class="chat-list" id="chatList">
       <div class="chat-list-top chat-list-top-bar">
-        <span class="chat-list-label p-0 m-0">Диалоги и группы</span>
+        <span class="chat-list-label p-0 m-0 flex-row-gap-6">
+          <span>Диалоги и группы</span>
+          <span class="unread-badge global-unread-badge <?= $totalUnread > 0 ? '' : 'd-none' ?>" id="globalUnreadBadge"><?= $totalUnread ?></span>
+        </span>
         <button class="btn btn-ghost btn-pill-xs" id="openCreateGroupBtn">
           ➕ Группа
         </button>
@@ -98,14 +108,13 @@ require __DIR__ . '/templates/partials/head.php';
             $initial  = mb_strtoupper(mb_substr($chatName, 0, 1));
             $lastMsg  = $chat['last_message'] ?? 'Нет сообщений';
             $myMsg    = ($chat['last_sender_id'] ?? null) == $userId;
+            $unread   = (int)($chat['unread_count'] ?? 0);
             $time     = !empty($chat['last_message_time'])
               ? date('H:i', strtotime($chat['last_message_time']))
               : '';
 
             // Clean attachment markers in preview
-            if (str_starts_with($lastMsg, '[attachment:')) {
-              $lastMsg = '📎 Вложение';
-            }
+            $lastMsg = Helpers::formatPreview($lastMsg);
           ?>
           <a class="chat-item" href="chat.php?id=<?= $chat['id'] ?>" data-chat-id="<?= $chat['id'] ?>">
             <div class="avatar <?= $isGroup ? 'avatar-group-grad' : '' ?>">
@@ -127,6 +136,9 @@ require __DIR__ . '/templates/partials/head.php';
                 <div class="chat-item-preview">
                   <?= $myMsg ? 'Вы: ' : '' ?><?= htmlspecialchars(mb_substr($lastMsg, 0, 42)) ?>
                 </div>
+                <?php if ($unread > 0): ?>
+                  <span class="unread-badge"><?= $unread ?></span>
+                <?php endif; ?>
               </div>
             </div>
           </a>
@@ -268,7 +280,9 @@ window.APP_CONFIG = {
   userId: <?= (int)$userId ?>,
   username: <?= json_encode($username) ?>,
   displayName: <?= json_encode($displayName) ?>,
-  defaultNode: <?= json_encode($defaultNode) ?>
+  defaultNode: <?= json_encode($defaultNode) ?>,
+  totalUnread: <?= (int)$totalUnread ?>,
+  token: <?= json_encode($_SESSION['jwt_token'] ?? '') ?>
 };
 </script>
 <script src="assets/js/app.js"></script>

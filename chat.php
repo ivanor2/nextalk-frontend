@@ -14,6 +14,9 @@ if (!isset($chatResponse['ok']) || !$chatResponse['ok']) {
 $chat = $chatResponse['chat'];
 $isGroup = ($chat['type'] ?? 'private') === 'group';
 
+// Отметить сообщения чата как прочитанные
+callNodeApi('POST', "/chats/$chatId/read");
+
 // POST: сохранить сообщение в БД (вызывается из JS)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['message'])) {
     $content = trim($_POST['message']);
@@ -58,6 +61,18 @@ if (isset($msgResponse['ok']) && $msgResponse['ok']) {
 $lastMessageId = !empty($messages) ? (int)end($messages)['id'] : 0;
 $companionInit = mb_strtoupper(mb_substr($companionName, 0, 1));
 $defaultNode = defined('WS_NODE_URL') ? WS_NODE_URL : 'ws://127.0.0.1:3001';
+
+// Число непрочитанных в других диалогах
+$otherChatsResp = callNodeApi('GET', '/chats');
+$otherUnread = 0;
+if (isset($otherChatsResp['ok']) && $otherChatsResp['ok']) {
+    foreach ($otherChatsResp['chats'] ?? [] as $c) {
+        if ((int)$c['id'] !== $chatId) {
+            $otherUnread += (int)($c['unread_count'] ?? 0);
+        }
+    }
+}
+
 $pageTitle = 'NexTalk — ' . $companionName;
 $metaDescription = 'Безопасный E2E-чат в NexTalk';
 require __DIR__ . '/templates/partials/head.php';
@@ -98,7 +113,12 @@ require __DIR__ . '/templates/partials/head.php';
       <div class="chat-list-label mt-16">Разделы</div>
       <a href="index.php" class="chat-item">
         <span class="chat-section-icon">💬</span>
-        <div class="chat-item-body"><div class="chat-item-name">Все диалоги</div></div>
+        <div class="chat-item-body">
+          <div class="chat-item-name flex-between">
+            <span>Все диалоги</span>
+            <span class="unread-badge sidebar-chats-badge <?= $otherUnread > 0 ? '' : 'd-none' ?>" id="sidebarChatsBadge"><?= $otherUnread ?></span>
+          </div>
+        </div>
       </a>
       <a href="contacts.php" class="chat-item">
         <span class="chat-section-icon">👥</span>
@@ -166,11 +186,11 @@ require __DIR__ . '/templates/partials/head.php';
             <div class="msg-day-divider"><span><?= date('d F Y', strtotime($msg['created_at'])) ?></span></div>
           <?php endif; ?>
 
-          <div class="message <?= $isMe ? 'out' : 'in' ?>" data-id="<?= $msg['id'] ?>">
+          <div class="message <?= $isMe ? 'out' : 'in' ?>" data-id="<?= $msg['id'] ?>" data-content="<?= htmlspecialchars($msg['content'], ENT_QUOTES, 'UTF-8') ?>" data-sender="<?= htmlspecialchars($msg['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
             <?php if (!$isMe): ?>
               <div class="msg-author"><?= htmlspecialchars($msg['username']) ?></div>
             <?php endif; ?>
-            <div class="msg-bubble"><?= nl2br(htmlspecialchars($msg['content'])) ?></div>
+            <div class="msg-bubble"><?= Helpers::renderMessageBubble($msg['content']) ?></div>
             <div class="msg-footer">
               <span class="msg-time"><?= date('H:i', strtotime($msg['created_at'])) ?></span>
               <?php if ($isMe): ?><span class="msg-status">✓✓</span><?php endif; ?>
@@ -348,7 +368,8 @@ window.CHAT_CONFIG = {
   companionName: <?= json_encode($companionName) ?>,
   companionId: <?= json_encode($companionId) ?>,
   lastMessageId: <?= (int)$lastMessageId ?>,
-  defaultNode: <?= json_encode($defaultNode) ?>
+  defaultNode: <?= json_encode($defaultNode) ?>,
+  token: <?= json_encode($_SESSION['jwt_token'] ?? '') ?>
 };
 </script>
 <script src="assets/js/app.js"></script>

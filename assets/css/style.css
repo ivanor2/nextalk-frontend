@@ -2060,6 +2060,21 @@ footer a { color: var(--accent); font-size: 13px; }
   transform: scale(1.02);
 }
 
+.file-desc-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+@keyframes chatItemFlash {
+  0% { background: var(--accent-dim, rgba(108, 99, 255, 0.25)); }
+  100% { background: transparent; }
+}
+
+.chat-item-highlight {
+  animation: chatItemFlash 1.6s ease;
+}
+
 /* Chat Info Panel (Right Sidebar) */
 .chat-info-panel {
   width: 300px;

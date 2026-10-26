@@ -4,8 +4,14 @@
 
 let lastMessageId = (window.CHAT_CONFIG && window.CHAT_CONFIG.lastMessageId) || 0;
 let ws = null;
+const safeStorage = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    remove(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+
 let defaultNode = (window.CHAT_CONFIG && window.CHAT_CONFIG.defaultNode) || 'ws://127.0.0.1:3001';
-let wsCurrentUrl = localStorage.getItem('nt-node') || defaultNode;
+let wsCurrentUrl = safeStorage.get('nt-node') || defaultNode;
 if (window.location.protocol === 'https:' && wsCurrentUrl.startsWith('ws://')) {
     wsCurrentUrl = defaultNode.startsWith('wss://') ? defaultNode : wsCurrentUrl.replace(/^ws:\/\//, 'wss://');
 }
@@ -60,10 +66,11 @@ function triggerNotification(sender, text) {
     } catch (e) {}
 }
 
-// ── Unread Tab Title Counter ────────────────────────────────
 window.addEventListener('focus', () => {
     unreadCount = 0;
     document.title = originalTitle;
+    const cid = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
+    if (cid) fetch(`api/mark_read.php?chat_id=${cid}`, { method: 'POST' }).catch(() => {});
 });
 
 function incrementUnread() {
@@ -79,7 +86,12 @@ function scrollToBottom(smooth = false) {
 }
 
 function formatTime(ts) {
-    const d = new Date(ts);
+    if (!ts) return '';
+    const safeTs = (typeof ts === 'string' && ts.includes(' ') && !ts.includes('T'))
+        ? ts.replace(' ', 'T')
+        : ts;
+    const d = new Date(safeTs);
+    if (isNaN(d.getTime())) return '';
     return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
 }
 
@@ -91,26 +103,39 @@ function formatBytes(bytes) {
 
 // ── JWT Token Retrieval ─────────────────────────────────────
 async function getJWT() {
-    if (jwtToken && jwtExpires > Date.now() / 1000 + 60) return jwtToken;
-    const cached = localStorage.getItem('nt-jwt');
-    const cachedExp = parseInt(localStorage.getItem('nt-jwt-exp') || '0');
-    if (cached && cachedExp > Date.now() / 1000 + 60) {
-        jwtToken = cached;
-        jwtExpires = cachedExp;
+    if (window.CHAT_CONFIG && window.CHAT_CONFIG.token) {
+        jwtToken = window.CHAT_CONFIG.token;
+        jwtExpires = Math.floor(Date.now() / 1000) + 86400 * 7;
         return jwtToken;
     }
+    if (jwtToken && jwtExpires > Date.now() / 1000 + 60) return jwtToken;
     try {
         const resp = await fetch('api/token.php');
         const data = await resp.json();
         if (data.ok && data.token) {
             jwtToken = data.token;
             jwtExpires = Math.floor(Date.now() / 1000) + (data.expires_in || 86400 * 7);
-            localStorage.setItem('nt-jwt', jwtToken);
-            localStorage.setItem('nt-jwt-exp', String(jwtExpires));
             return jwtToken;
         }
     } catch (e) {}
     return null;
+}
+
+function formatMessagePreview(content) {
+    if (!content) return '';
+    const trimmed = String(content).trim();
+    if (trimmed.startsWith('[attachment:')) {
+        const m = trimmed.match(/^\[attachment:(\{[\s\S]*\})\]$/);
+        if (m) {
+            try {
+                const att = JSON.parse(m[1]);
+                const icon = att.is_image ? '🖼️' : '📎';
+                return `${icon} ${att.filename || 'Вложение'}`;
+            } catch (e) {}
+        }
+        return '📎 Вложение';
+    }
+    return trimmed;
 }
 
 // ── Render Message (Attachments + Bubbles) ──────────────────
@@ -126,9 +151,17 @@ function renderMessage(msg) {
     const empty = wrap.querySelector('#emptyChat');
     if (empty) empty.remove();
 
+    const rawContent = msg.content || '';
+    const numId = Number(msg.id);
+    if (!isNaN(numId) && numId > 0) {
+        lastMessageId = Math.max(lastMessageId, numId);
+    }
+
     const div = document.createElement('div');
     div.className = `message ${isMe ? 'out' : 'in'}`;
     div.dataset.id = msg.id || ('ws-' + Date.now());
+    div.dataset.content = rawContent;
+    div.dataset.sender = msg.sender || msg.username || '';
 
     const timeStr = msg.timestamp
         ? formatTime(msg.timestamp)
@@ -138,10 +171,9 @@ function renderMessage(msg) {
         ? `<div class="msg-author">${escHtml(msg.display || msg.sender || msg.username || 'Собеседник')}</div>`
         : '';
 
-    const rawContent = msg.content || '';
     let bubbleBody = '';
-
-    const attMatch = rawContent.match(/^\[attachment:(\{.*\})\]$/);
+    const trimmed = rawContent.trim();
+    const attMatch = trimmed.match(/^\[attachment:(\{[\s\S]*\})\]$/);
     if (attMatch) {
         try {
             const att = JSON.parse(attMatch[1]);
@@ -205,8 +237,16 @@ function setNodeStatus(state, text) {
 // ── WebSocket Connection ────────────────────────────────────
 async function wsConnect(url) {
     wsCurrentUrl = url;
+    clearTimeout(wsReconnectTimer);
+
     if (ws) {
-        try { ws.close(); } catch (e) {}
+        try {
+            ws.onopen = null;
+            ws.onmessage = null;
+            ws.onclose = null;
+            ws.onerror = null;
+            ws.close();
+        } catch (e) {}
         ws = null;
     }
 
@@ -218,31 +258,40 @@ async function wsConnect(url) {
         return;
     }
 
+    let socket;
     try {
-        ws = new WebSocket(url);
+        socket = new WebSocket(url);
     } catch (e) {
         setNodeStatus('error', 'Ошибка URL');
         scheduleReconnect();
         return;
     }
 
-    ws.addEventListener('open', () => {
+    ws = socket;
+
+    socket.addEventListener('open', () => {
+        if (ws !== socket) return;
         wsReconnectDelay = 1500;
         wsSend({ type: 'auth', token });
     });
 
-    ws.addEventListener('message', e => {
+    socket.addEventListener('message', e => {
+        if (ws !== socket) return;
         let m;
         try { m = JSON.parse(e.data); } catch (x) { return; }
         handleWsMsg(m);
     });
 
-    ws.addEventListener('close', () => {
+    socket.addEventListener('close', () => {
+        if (ws !== socket) return;
         setNodeStatus('error', 'Не подключён');
         scheduleReconnect();
     });
 
-    ws.addEventListener('error', () => setNodeStatus('error', 'Ошибка WebSocket'));
+    socket.addEventListener('error', () => {
+        if (ws !== socket) return;
+        setNodeStatus('error', 'Ошибка WebSocket');
+    });
 }
 
 function scheduleReconnect() {
@@ -261,6 +310,33 @@ function wsSend(data) {
     return false;
 }
 
+// ── Unread Badge for Other Chats ────────────────────────────
+async function updateSidebarBadge() {
+    try {
+        const resp = await fetch('api/get_chats.php?t=' + Date.now());
+        const data = await resp.json();
+        if (data.ok && Array.isArray(data.chats)) {
+            const currentChatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
+            let otherUnread = 0;
+            data.chats.forEach(c => {
+                if (String(c.id) !== String(currentChatId)) {
+                    otherUnread += parseInt(c.unread_count || 0, 10);
+                }
+            });
+            const badge = document.getElementById('sidebarChatsBadge');
+            if (badge) {
+                if (otherUnread > 0) {
+                    badge.textContent = String(otherUnread);
+                    badge.classList.remove('d-none');
+                } else {
+                    badge.textContent = '0';
+                    badge.classList.add('d-none');
+                }
+            }
+        }
+    } catch (e) {}
+}
+
 // ── Handle Incoming Messages ────────────────────────────────
 function handleWsMsg(msg) {
     const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
@@ -277,6 +353,7 @@ function handleWsMsg(msg) {
                 if (cs) { cs.textContent = 'онлайн'; cs.className = 'chat-header-status online'; }
                 if (ss) ss.textContent = 'онлайн';
             }
+            updateSidebarBadge();
             break;
 
         case 'joined':
@@ -285,13 +362,38 @@ function handleWsMsg(msg) {
 
         case 'message':
             if (String(msg.chat_id) === String(chatId)) {
-                if (!document.querySelector(`[data-id="${msg.id}"]`)) {
+                const numId = Number(msg.id);
+                if (!isNaN(numId) && numId > 0) {
+                    lastMessageId = Math.max(lastMessageId, numId);
+                }
+                const existingById = msg.id ? document.querySelector(`[data-id="${msg.id}"]`) : null;
+                const existingByContent = Array.from(document.querySelectorAll('.message.in'))
+                    .find(el => el.dataset.content === msg.content && (el.dataset.sender === msg.sender || !el.dataset.sender));
+
+                if (!existingById && !existingByContent) {
                     renderMessage(msg);
                     playNotificationSound();
-                    triggerNotification(msg.sender || companionName, msg.content || '');
+                    triggerNotification(msg.sender || companionName, formatMessagePreview(msg.content || ''));
                     incrementUnread();
+                    fetch(`api/mark_read.php?chat_id=${chatId}`, { method: 'POST' }).catch(() => {});
+                } else if (existingByContent && !existingById && msg.id) {
+                    existingByContent.dataset.id = msg.id;
                 }
                 showTypingIndicator(false);
+            } else {
+                // Incoming message from another chat while in this chat
+                playNotificationSound();
+                const preview = formatMessagePreview(msg.content);
+                showToast(`💬 ${msg.sender}: ${preview.substring(0, 30)}`, 'info');
+                triggerNotification(msg.sender, preview);
+                incrementUnread();
+
+                const badge = document.getElementById('sidebarChatsBadge');
+                if (badge) {
+                    const current = parseInt(badge.textContent || '0', 10);
+                    badge.textContent = String(current + 1);
+                    badge.classList.remove('d-none');
+                }
             }
             break;
 
@@ -357,14 +459,30 @@ async function fetchNewMessages() {
         const data = await resp.json();
         if (!data.ok || !data.messages?.length) return;
         data.messages.forEach(msg => {
+            const numId = Number(msg.id);
+            if (!isNaN(numId) && numId > 0) {
+                lastMessageId = Math.max(lastMessageId, numId);
+            }
             if (msg.sender_id == curUserId) {
-                lastMessageId = Math.max(lastMessageId, msg.id);
+                const existingMe = document.querySelector(`[data-id="${msg.id}"]`);
+                if (!existingMe) {
+                    const temp = Array.from(document.querySelectorAll('.message.out[data-id^="ws-"]'))
+                        .find(m => m.dataset.content === msg.content);
+                    if (temp) temp.dataset.id = msg.id;
+                }
                 return;
             }
             if (document.querySelector(`[data-id="${msg.id}"]`)) {
-                lastMessageId = Math.max(lastMessageId, msg.id);
                 return;
             }
+            // Check if already displayed via temporary ws- ID or matching content
+            const existingTemp = Array.from(document.querySelectorAll('.message.in'))
+                .find(m => m.dataset.content === msg.content && (m.dataset.sender === msg.username || !m.dataset.sender));
+            if (existingTemp) {
+                existingTemp.dataset.id = msg.id;
+                return;
+            }
+
             renderMessage({
                 id: msg.id,
                 sender: msg.username,
@@ -372,7 +490,6 @@ async function fetchNewMessages() {
                 content: msg.content,
                 timestamp: msg.created_at
             });
-            lastMessageId = Math.max(lastMessageId, msg.id);
             playNotificationSound();
             incrementUnread();
         });
@@ -397,10 +514,7 @@ async function sendTextMessage(customText = null) {
     }
     if (sendBtn) sendBtn.disabled = true;
 
-    // 1. WebSocket send
-    wsSend({ type: 'send', chat_id: chatId, content, recipient: companionName });
-
-    // 2. HTTP persistence
+    // 1. HTTP persistence first (gets the real database message ID)
     try {
         const fd = new FormData();
         fd.append('message', content);
@@ -411,14 +525,29 @@ async function sendTextMessage(customText = null) {
         });
         const data = await resp.json();
         if (data.ok) {
+            const dbId = data.id;
+            const timestamp = data.timestamp || new Date().toISOString();
             renderMessage({
-                id: data.id,
+                id: dbId,
                 sender: curUsername,
                 sender_id: curUserId,
                 content,
-                timestamp: data.timestamp || new Date().toISOString(),
+                timestamp,
             });
-            lastMessageId = Math.max(lastMessageId, data.id || 0);
+            if (dbId) {
+                lastMessageId = Math.max(lastMessageId, Number(dbId));
+            }
+
+            // 2. Broadcast via WebSocket with real DB message ID
+            wsSend({
+                type: 'send',
+                chat_id: chatId,
+                content,
+                db_message_id: dbId,
+                recipient: companionName
+            });
+        } else {
+            showToast(data.error || 'Ошибка отправки', 'error');
         }
     } catch (e) {
         showToast('Ошибка сохранения сообщения', 'error');
@@ -732,6 +861,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial scroll & WS connect
     scrollToBottom();
+    updateSidebarBadge();
     wsConnect(wsCurrentUrl);
     setInterval(() => wsSend({ type: 'ping' }), 30000);
 });
