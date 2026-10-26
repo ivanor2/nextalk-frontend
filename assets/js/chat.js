@@ -375,7 +375,9 @@ function handleWsMsg(msg) {
                     playNotificationSound();
                     triggerNotification(msg.sender || companionName, formatMessagePreview(msg.content || ''));
                     incrementUnread();
-                    fetch(`api/mark_read.php?chat_id=${chatId}`, { method: 'POST' }).catch(() => {});
+                    if (!document.hidden) {
+                        fetch(`api/mark_read.php?chat_id=${chatId}`, { method: 'POST' }).catch(() => {});
+                    }
                 } else if (existingByContent && !existingById && msg.id) {
                     existingByContent.dataset.id = msg.id;
                 }
