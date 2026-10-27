@@ -40,17 +40,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['message'])) {
     exit;
 }
 
-// Имя и ID собеседника
+// Имя и ID собеседника, загрузка профиля
 $companionName = 'Чат';
+$companionUsername = '';
 $companionId   = null;
+$companionUser = null;
+$companionAvatarUrl = null;
+$companionBio = '';
+
 if (!$isGroup) {
-    $companionName = $chat['companion_name'] ?: 'Чат';
     $companionId = $chat['companion_id'] ?? null;
+    $companionName = $chat['companion_name'] ?: 'Чат';
+    $companionUsername = $companionName;
+
+    if ($companionId) {
+        $userResp = callAuthApi('GET', "/users/$companionId", null, true);
+        if (!empty($userResp['ok']) && !empty($userResp['user'])) {
+            $companionUser = $userResp['user'];
+            $companionUsername = $companionUser['username'] ?? $companionName;
+            $companionName = $companionUser['display_name'] ?: $companionUsername;
+            $companionAvatarUrl = Helpers::avatarUrl($companionUser['avatar_path'] ?? null);
+            $companionBio = trim($companionUser['status_text'] ?? '');
+        }
+    }
 } else {
     $companionName = $chat['name'] ?: 'Групповой чат';
 }
 
-$members = $chat['members'] ?? [];
+$rawMembers = $chat['members'] ?? [];
+$members = [];
+if ($isGroup && !empty($rawMembers)) {
+    foreach ($rawMembers as $mem) {
+        $mid = (int)$mem['user_id'];
+        $mUname = $mem['username'] ?: '';
+        $mDisp = $mUname;
+        $mAvatar = null;
+        $mBio = '';
+
+        $mResp = callAuthApi('GET', "/users/$mid", null, true);
+        if (!empty($mResp['ok']) && !empty($mResp['user'])) {
+            $u = $mResp['user'];
+            $mUname = $u['username'];
+            $mDisp = $u['display_name'] ?: $mUname;
+            $mAvatar = $u['avatar_path'] ?? null;
+            $mBio = trim($u['status_text'] ?? '');
+        }
+
+        $members[] = [
+            'user_id' => $mid,
+            'username' => $mUname,
+            'display_name' => $mDisp,
+            'avatar_path' => $mAvatar,
+            'avatar_url' => Helpers::avatarUrl($mAvatar),
+            'status_text' => $mBio
+        ];
+    }
+} else {
+    $members = $rawMembers;
+}
 
 // Начальные сообщения
 $msgResponse = callNodeApi('GET', "/messages?chat_id=$chatId&limit=100");
@@ -147,7 +194,13 @@ require __DIR__ . '/templates/partials/head.php';
   <main class="chat-area" id="chatArea">
     <!-- Chat Header -->
     <div class="chat-header">
-      <div class="avatar cursor-pointer" id="companionAvatar"><?= $companionInit ?></div>
+      <div class="avatar cursor-pointer <?= $isGroup ? 'avatar-group-grad' : '' ?>" id="companionAvatar">
+        <?php if ($companionAvatarUrl): ?>
+          <img src="<?= htmlspecialchars($companionAvatarUrl) ?>" alt="<?= htmlspecialchars($companionName) ?>" class="avatar-img">
+        <?php else: ?>
+          <?= $companionInit ?>
+        <?php endif; ?>
+      </div>
       <div class="chat-header-info cursor-pointer" id="chatHeaderTitle">
         <div class="chat-header-name">
           <?= htmlspecialchars($companionName) ?>
@@ -156,7 +209,13 @@ require __DIR__ . '/templates/partials/head.php';
           <?php endif; ?>
         </div>
         <div class="chat-header-status" id="chatStatus">
-          <?= $isGroup ? (count($members) . ' участников') : 'Загрузка...' ?>
+          <?php if ($isGroup): ?>
+            <?= count($members) . ' участников' ?>
+          <?php elseif (!empty($companionBio)): ?>
+            <span class="chat-bio-badge" title="<?= htmlspecialchars($companionBio) ?>">💬 <?= htmlspecialchars(mb_substr($companionBio, 0, 36)) ?><?= mb_strlen($companionBio) > 36 ? '…' : '' ?></span>
+          <?php else: ?>
+            Загрузка...
+          <?php endif; ?>
         </div>
       </div>
 
@@ -228,17 +287,35 @@ require __DIR__ . '/templates/partials/head.php';
     </div>
 
     <div class="info-panel-profile">
-      <div class="profile-avatar-large avatar-xl">
-        <?= $companionInit ?>
+      <div class="profile-avatar-large avatar-xl <?= $isGroup ? 'avatar-group-grad' : '' ?>">
+        <?php if ($companionAvatarUrl): ?>
+          <img src="<?= htmlspecialchars($companionAvatarUrl) ?>" alt="<?= htmlspecialchars($companionName) ?>">
+        <?php else: ?>
+          <?= $companionInit ?>
+        <?php endif; ?>
       </div>
       <div class="info-panel-name"><?= htmlspecialchars($companionName) ?></div>
-      <?php if (!$isGroup && $companionName): ?>
-        <div class="info-panel-username">@<?= htmlspecialchars($companionName) ?></div>
+      <?php if (!$isGroup && $companionUsername): ?>
+        <div class="info-panel-username">@<?= htmlspecialchars($companionUsername) ?></div>
       <?php endif; ?>
       <div class="info-panel-status" id="infoPanelStatus">
         <?= $isGroup ? 'Групповая беседа' : 'Собеседник' ?>
       </div>
     </div>
+
+    <?php if (!$isGroup): ?>
+      <!-- Profile Bio Section (Описание профиля собеседника) -->
+      <div class="info-panel-section">
+        <div class="info-section-title">О себе</div>
+        <div class="info-bio-card">
+          <?php if (!empty($companionBio)): ?>
+            <div class="info-bio-text">“<?= htmlspecialchars($companionBio) ?>”</div>
+          <?php else: ?>
+            <div class="info-bio-text text-muted">Пользователь не указал информацию о себе</div>
+          <?php endif; ?>
+        </div>
+      </div>
+    <?php endif; ?>
 
     <div class="info-panel-section">
       <div class="info-section-title">Безопасность и шифрование</div>
@@ -260,35 +337,35 @@ require __DIR__ . '/templates/partials/head.php';
         </div>
         <div class="flex-col-gap-8" id="chatMembersList">
           <?php foreach ($members as $mem): ?>
-            <div class="member-item-row">
+            <div class="member-item-row"
+                 data-user-id="<?= $mem['user_id'] ?>"
+                 data-username="<?= htmlspecialchars($mem['username'] ?? '') ?>"
+                 data-display-name="<?= htmlspecialchars($mem['display_name'] ?? $mem['username'] ?? '') ?>"
+                 data-status="<?= htmlspecialchars($mem['status_text'] ?? '') ?>"
+                 data-avatar="<?= htmlspecialchars($mem['avatar_url'] ?? '') ?>"
+                 title="Нажмите, чтобы просмотреть профиль">
               <div class="avatar avatar-sm">
-                <?= mb_strtoupper(mb_substr($mem['username'] ?: 'U', 0, 1)) ?>
+                <?php if (!empty($mem['avatar_url'])): ?>
+                  <img src="<?= htmlspecialchars($mem['avatar_url']) ?>" alt="<?= htmlspecialchars($mem['display_name'] ?? '') ?>" class="avatar-img">
+                <?php else: ?>
+                  <?= mb_strtoupper(mb_substr($mem['display_name'] ?? $mem['username'] ?? 'U', 0, 1)) ?>
+                <?php endif; ?>
               </div>
-              <span class="member-item-name"><?= htmlspecialchars($mem['username'] ?: 'Участник #' . $mem['user_id']) ?></span>
-              <?php if ($mem['user_id'] == $userId): ?>
-                <span class="badge-status badge-active badge-you">Вы</span>
-              <?php endif; ?>
+              <div class="member-info-col">
+                <div class="member-item-name-wrap">
+                  <span class="member-item-name"><?= htmlspecialchars($mem['display_name'] ?? $mem['username'] ?? 'Участник #' . $mem['user_id']) ?></span>
+                  <?php if ($mem['user_id'] == $userId): ?>
+                    <span class="badge-status badge-active badge-you">Вы</span>
+                  <?php endif; ?>
+                </div>
+                <?php if (!empty($mem['status_text'])): ?>
+                  <div class="member-item-status" title="<?= htmlspecialchars($mem['status_text']) ?>">
+                    <?= htmlspecialchars(mb_substr($mem['status_text'], 0, 36)) ?><?= mb_strlen($mem['status_text']) > 36 ? '…' : '' ?>
+                  </div>
+                <?php endif; ?>
+              </div>
             </div>
           <?php endforeach; ?>
-        </div>
-      </div>
-
-      <!-- Add member to group modal -->
-      <div class="modal-overlay" id="addMemberModal">
-        <div class="modal modal-max-sm">
-          <h3>👥 Добавить участника в группу</h3>
-          <button class="icon-btn modal-close" id="closeAddMemberModal">✕</button>
-          <p class="card-desc-lg">
-            Введите @username пользователя для приглашения в группу:
-          </p>
-          <form action="api/add_chat_member.php" method="POST" id="addMemberForm">
-            <input type="hidden" name="chat_id" value="<?= (int)$chatId ?>">
-            <div class="field">
-              <label for="newMemberUsername">Имя пользователя (@username)</label>
-              <input type="text" id="newMemberUsername" name="username" placeholder="например: chel" required autocomplete="off">
-            </div>
-            <button type="submit" class="btn-submit mt-12">Добавить в группу</button>
-          </form>
         </div>
       </div>
     <?php endif; ?>
@@ -307,6 +384,48 @@ require __DIR__ . '/templates/partials/head.php';
   </aside>
 
 </div>
+
+<?php if ($isGroup): ?>
+<!-- Add member to group modal (positioned at root level for proper visibility) -->
+<div class="modal-overlay" id="addMemberModal">
+  <div class="modal modal-max-sm">
+    <h3>👥 Добавить участника в группу</h3>
+    <button class="icon-btn modal-close" id="closeAddMemberModal">✕</button>
+    <p class="card-desc-lg">
+      Введите @username пользователя или выберите из найденных:
+    </p>
+    <form action="api/add_chat_member.php" method="POST" id="addMemberForm">
+      <input type="hidden" name="chat_id" value="<?= (int)$chatId ?>">
+      <input type="hidden" name="user_id" id="newMemberUserId" value="">
+      <div class="field rel">
+        <label for="newMemberUsername">Имя пользователя (@username)</label>
+        <input type="text" id="newMemberUsername" name="username" placeholder="например: chel" required autocomplete="off">
+        <div class="add-member-dropdown" id="addMemberDropdown"></div>
+      </div>
+      <button type="submit" class="btn-submit mt-12" id="submitAddMemberBtn">Добавить в группу</button>
+    </form>
+  </div>
+</div>
+
+<!-- Member Profile Modal (view group member profile on click) -->
+<div class="modal-overlay" id="memberProfileModal">
+  <div class="modal modal-max-sm">
+    <button class="icon-btn modal-close" id="closeMemberProfileModal">✕</button>
+    <div class="user-profile-modal-body">
+      <div class="profile-avatar-large avatar-xl" id="memberModalAvatar">U</div>
+      <div class="info-panel-name mt-12" id="memberModalName">Имя</div>
+      <div class="info-panel-username" id="memberModalUsername">@username</div>
+      <div class="info-panel-section w-100 text-left mt-16">
+        <div class="info-section-title">О себе</div>
+        <div class="info-bio-card">
+          <div class="info-bio-text" id="memberModalBio">Пользователь не указал информацию о себе</div>
+        </div>
+      </div>
+      <button class="btn btn-primary w-100 mt-16" id="memberModalStartChatBtn">💬 Написать сообщение</button>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
 <!-- Node Connection Modal -->
 <div class="modal-overlay" id="nodesModal">
@@ -369,6 +488,9 @@ window.CHAT_CONFIG = {
   chatId: <?= (int)$chatId ?>,
   isGroup: <?= $isGroup ? 'true' : 'false' ?>,
   companionName: <?= json_encode($companionName) ?>,
+  companionUsername: <?= json_encode($companionUsername) ?>,
+  companionBio: <?= json_encode($companionBio) ?>,
+  companionAvatarUrl: <?= json_encode($companionAvatarUrl) ?>,
   companionId: <?= json_encode($companionId) ?>,
   lastMessageId: <?= (int)$lastMessageId ?>,
   defaultNode: <?= json_encode($defaultNode) ?>,

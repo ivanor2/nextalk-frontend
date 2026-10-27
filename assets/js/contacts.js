@@ -41,16 +41,24 @@ document.addEventListener('DOMContentLoaded', () => {
             searchDropdown.classList.add('visible');
             return;
         }
-        searchDropdown.innerHTML = users.map(u => `
-            <div class="search-result-item" data-id="${u.id}">
-                <div class="avatar avatar-sm">${(u.display_name || u.username)[0].toUpperCase()}</div>
-                <div class="search-result-info">
-                    <div class="result-name">${escHtml(u.display_name || u.username)}</div>
-                    <div class="result-id">@${escHtml(u.username)}</div>
+        searchDropdown.innerHTML = users.map(u => {
+            const av = u.avatar_path
+                ? `<img src="api/avatar.php?path=${encodeURIComponent(u.avatar_path)}" class="avatar-img" alt="${escHtml(u.username)}">`
+                : escHtml((u.display_name || u.username)[0].toUpperCase());
+            const bio = u.status_text
+                ? `<div class="result-bio">“${escHtml(u.status_text)}”</div>`
+                : '';
+            return `
+                <div class="search-result-item" data-id="${u.id}">
+                    <div class="avatar avatar-sm">${av}</div>
+                    <div class="search-result-info">
+                        <div class="result-name">${escHtml(u.display_name || u.username)} <span class="result-username text-muted">@${escHtml(u.username)}</span></div>
+                        ${bio}
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="addContact(${u.id})">+ Добавить</button>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="addContact(${u.id})">+ Добавить</button>
-            </div>
-        `).join('');
+            `;
+        }).join('');
         searchDropdown.classList.add('visible');
     }
 });

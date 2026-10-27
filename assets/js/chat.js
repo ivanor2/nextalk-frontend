@@ -414,8 +414,9 @@ function handleWsMsg(msg) {
                 const s = document.getElementById('chatStatus');
                 const sb = document.getElementById('sidebarStatus');
                 const av = document.getElementById('companionAvatar');
+                const bio = window.CHAT_CONFIG?.companionBio ? ` · “${escHtml(window.CHAT_CONFIG.companionBio)}”` : '';
                 if (msg.online) {
-                    if (s) { s.textContent = 'онлайн'; s.className = 'chat-header-status online'; }
+                    if (s) { s.innerHTML = `онлайн${bio}`; s.className = 'chat-header-status online'; }
                     if (sb) sb.textContent = 'онлайн';
                     if (av && !av.querySelector('.online-dot')) {
                         const dot = document.createElement('div');
@@ -423,7 +424,7 @@ function handleWsMsg(msg) {
                         av.appendChild(dot);
                     }
                 } else {
-                    if (s) { s.textContent = 'не в сети'; s.className = 'chat-header-status'; }
+                    if (s) { s.innerHTML = `не в сети${bio}`; s.className = 'chat-header-status'; }
                     if (sb) sb.textContent = 'не в сети';
                     av?.querySelector('.online-dot')?.remove();
                 }
@@ -813,15 +814,23 @@ document.addEventListener('DOMContentLoaded', () => {
                         searchDropdown.classList.add('visible');
                         return;
                     }
-                    searchDropdown.innerHTML = users.map(u => `
-                        <div class="search-result-item" data-id="${u.id}">
-                            <div class="avatar avatar-sm">${escHtml(u.username[0].toUpperCase())}</div>
-                            <div class="search-result-info">
-                                <div class="result-name">${escHtml(u.username)}</div>
-                                <div class="result-id">ID: ${u.id}</div>
+                    searchDropdown.innerHTML = users.map(u => {
+                        const av = u.avatar_path
+                            ? `<img src="api/avatar.php?path=${encodeURIComponent(u.avatar_path)}" class="avatar-img" alt="${escHtml(u.username)}">`
+                            : escHtml((u.display_name || u.username)[0].toUpperCase());
+                        const bio = u.status_text
+                            ? `<div class="result-bio">“${escHtml(u.status_text)}”</div>`
+                            : '';
+                        return `
+                            <div class="search-result-item" data-id="${u.id}">
+                                <div class="avatar avatar-sm">${av}</div>
+                                <div class="search-result-info">
+                                    <div class="result-name">${escHtml(u.display_name || u.username)} <span class="result-username text-muted">@${escHtml(u.username)}</span></div>
+                                    ${bio}
+                                </div>
                             </div>
-                        </div>
-                    `).join('');
+                        `;
+                    }).join('');
                     searchDropdown.classList.add('visible');
                     searchDropdown.querySelectorAll('.search-result-item').forEach(item => {
                         item.addEventListener('click', () => {
@@ -843,26 +852,117 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── Add Member Modal & Form ──────────────────────────────
+    // ── Member Profile Modal (View member details in group) ────
+    const memberProfileModal = document.getElementById('memberProfileModal');
+    const closeMemberProfileModal = document.getElementById('closeMemberProfileModal');
+    const memberModalAvatar = document.getElementById('memberModalAvatar');
+    const memberModalName = document.getElementById('memberModalName');
+    const memberModalUsername = document.getElementById('memberModalUsername');
+    const memberModalBio = document.getElementById('memberModalBio');
+    const memberModalStartChatBtn = document.getElementById('memberModalStartChatBtn');
+
+    function openMemberProfile(data) {
+        if (!memberProfileModal) return;
+        const uid = data.userId;
+        const uname = data.username || 'Пользователь';
+        const dname = data.displayName || uname;
+        const status = data.status || '';
+        const avUrl = data.avatar || '';
+
+        if (memberModalAvatar) {
+            if (avUrl) {
+                memberModalAvatar.innerHTML = `<img src="${escHtml(avUrl)}" alt="${escHtml(dname)}" class="avatar-img">`;
+            } else {
+                memberModalAvatar.textContent = (dname || uname)[0].toUpperCase();
+            }
+        }
+        if (memberModalName) memberModalName.textContent = dname;
+        if (memberModalUsername) memberModalUsername.textContent = '@' + uname;
+        if (memberModalBio) {
+            if (status.trim()) {
+                memberModalBio.textContent = `“${status}”`;
+                memberModalBio.classList.remove('text-muted');
+            } else {
+                memberModalBio.textContent = 'Пользователь не указал информацию о себе';
+                memberModalBio.classList.add('text-muted');
+            }
+        }
+
+        if (memberModalStartChatBtn) {
+            if (String(uid) === String(window.CHAT_CONFIG?.userId)) {
+                memberModalStartChatBtn.style.display = 'none';
+            } else {
+                memberModalStartChatBtn.style.display = 'block';
+                memberModalStartChatBtn.onclick = () => {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = 'api/create_chat.php';
+                    form.innerHTML = `<input type="hidden" name="user_id" value="${uid}">`;
+                    document.body.appendChild(form);
+                    form.submit();
+                };
+            }
+        }
+
+        memberProfileModal.classList.add('open');
+    }
+
+    function closeMemberProfile() {
+        if (memberProfileModal) memberProfileModal.classList.remove('open');
+    }
+
+    closeMemberProfileModal?.addEventListener('click', closeMemberProfile);
+    if (memberProfileModal) {
+        memberProfileModal.addEventListener('click', e => {
+            if (e.target === memberProfileModal) closeMemberProfile();
+        });
+    }
+
+    function attachMemberRowListeners() {
+        document.querySelectorAll('#chatMembersList .member-item-row').forEach(row => {
+            if (row.dataset.hasListener) return;
+            row.dataset.hasListener = '1';
+            row.addEventListener('click', () => {
+                openMemberProfile({
+                    userId: row.dataset.userId,
+                    username: row.dataset.username,
+                    displayName: row.dataset.displayName,
+                    status: row.dataset.status,
+                    avatar: row.dataset.avatar
+                });
+            });
+        });
+    }
+    attachMemberRowListeners();
+
+    // ── Add Member Modal & Form (Now at root level) ────────────
     const openAddMemberBtn = document.getElementById('openAddMemberBtn');
     const headerAddMemberBtn = document.getElementById('headerAddMemberBtn');
     const addMemberModal = document.getElementById('addMemberModal');
     const closeAddMemberModal = document.getElementById('closeAddMemberModal');
     const addMemberForm = document.getElementById('addMemberForm');
     const newMemberUsernameInput = document.getElementById('newMemberUsername');
+    const newMemberUserId = document.getElementById('newMemberUserId');
+    const addMemberDropdown = document.getElementById('addMemberDropdown');
 
     function openAddMemberDialog() {
         if (!addMemberModal) return;
         addMemberModal.classList.add('open');
         if (newMemberUsernameInput) {
             newMemberUsernameInput.value = '';
+            if (newMemberUserId) newMemberUserId.value = '';
             setTimeout(() => newMemberUsernameInput.focus(), 60);
+        }
+        if (addMemberDropdown) {
+            addMemberDropdown.innerHTML = '';
+            addMemberDropdown.classList.remove('visible');
         }
     }
 
     function closeAddMemberDialog() {
         if (!addMemberModal) return;
         addMemberModal.classList.remove('open');
+        if (addMemberDropdown) addMemberDropdown.classList.remove('visible');
     }
 
     openAddMemberBtn?.addEventListener('click', openAddMemberDialog);
@@ -873,6 +973,65 @@ document.addEventListener('DOMContentLoaded', () => {
         addMemberModal.addEventListener('click', e => {
             if (e.target === addMemberModal) {
                 closeAddMemberDialog();
+            }
+        });
+    }
+
+    // Live search suggestions inside Add Member modal
+    let addMemberSearchTimeout = null;
+    if (newMemberUsernameInput && addMemberDropdown) {
+        newMemberUsernameInput.addEventListener('input', () => {
+            clearTimeout(addMemberSearchTimeout);
+            const q = newMemberUsernameInput.value.trim().replace(/^@/, '');
+            if (q.length < 1) {
+                addMemberDropdown.innerHTML = '';
+                addMemberDropdown.classList.remove('visible');
+                return;
+            }
+
+            addMemberSearchTimeout = setTimeout(async () => {
+                try {
+                    const resp = await fetch(`api/search_users.php?q=${encodeURIComponent(q)}`);
+                    const users = await resp.json();
+                    if (!users.length) {
+                        addMemberDropdown.innerHTML = '<div class="search-no-result p-12 text-muted fs-12">Пользователи не найдены</div>';
+                        addMemberDropdown.classList.add('visible');
+                        return;
+                    }
+
+                    addMemberDropdown.innerHTML = users.map(u => {
+                        const av = u.avatar_path
+                            ? `<img src="api/avatar.php?path=${encodeURIComponent(u.avatar_path)}" class="avatar-img" alt="${escHtml(u.username)}">`
+                            : escHtml((u.display_name || u.username)[0].toUpperCase());
+                        const bio = u.status_text
+                            ? `<div class="result-bio">“${escHtml(u.status_text)}”</div>`
+                            : '';
+                        return `
+                            <div class="search-result-item" data-id="${u.id}" data-username="${escHtml(u.username)}" data-name="${escHtml(u.display_name || u.username)}">
+                                <div class="avatar avatar-sm">${av}</div>
+                                <div class="search-result-info">
+                                    <div class="result-name">${escHtml(u.display_name || u.username)} <span class="result-username text-muted">@${escHtml(u.username)}</span></div>
+                                    ${bio}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    addMemberDropdown.classList.add('visible');
+
+                    addMemberDropdown.querySelectorAll('.search-result-item').forEach(item => {
+                        item.addEventListener('click', () => {
+                            newMemberUsernameInput.value = item.dataset.username;
+                            if (newMemberUserId) newMemberUserId.value = item.dataset.id;
+                            addMemberDropdown.classList.remove('visible');
+                        });
+                    });
+                } catch (e) {}
+            }, 200);
+        });
+
+        document.addEventListener('click', e => {
+            if (!e.target.closest('#addMemberModal')) {
+                addMemberDropdown.classList.remove('visible');
             }
         });
     }
@@ -910,17 +1069,42 @@ document.addEventListener('DOMContentLoaded', () => {
                     showToast('✅ Пользователь добавлен в группу!', 'success');
                     closeAddMemberDialog();
 
-                    const addedName = data.username || usernameVal.replace(/^@/, '');
+                    const addedUname = data.username || usernameVal.replace(/^@/, '');
+                    const addedDname = data.display_name || addedUname;
+                    const addedBio = data.status_text || '';
+                    const addedAvatar = data.avatar_url || '';
+                    const addedUid = data.user_id || '';
+
                     const membersList = document.getElementById('chatMembersList');
                     if (membersList) {
-                        const firstChar = (addedName.charAt(0) || 'U').toUpperCase();
                         const row = document.createElement('div');
                         row.className = 'member-item-row';
+                        row.dataset.userId = addedUid;
+                        row.dataset.username = addedUname;
+                        row.dataset.displayName = addedDname;
+                        row.dataset.status = addedBio;
+                        row.dataset.avatar = addedAvatar;
+                        row.title = 'Нажмите, чтобы просмотреть профиль';
+
+                        const avatarContent = addedAvatar
+                            ? `<img src="${escHtml(addedAvatar)}" alt="${escHtml(addedDname)}" class="avatar-img">`
+                            : escHtml(addedDname[0].toUpperCase());
+
+                        const statusHtml = addedBio
+                            ? `<div class="member-item-status" title="${escHtml(addedBio)}">${escHtml(addedBio.substring(0, 36))}${addedBio.length > 36 ? '…' : ''}</div>`
+                            : '';
+
                         row.innerHTML = `
-                            <div class="avatar avatar-sm">${escHtml(firstChar)}</div>
-                            <span class="member-item-name">${escHtml(addedName)}</span>
+                            <div class="avatar avatar-sm">${avatarContent}</div>
+                            <div class="member-info-col">
+                                <div class="member-item-name-wrap">
+                                    <span class="member-item-name">${escHtml(addedDname)}</span>
+                                </div>
+                                ${statusHtml}
+                            </div>
                         `;
                         membersList.appendChild(row);
+                        attachMemberRowListeners();
                     }
 
                     // Update count indicators in UI

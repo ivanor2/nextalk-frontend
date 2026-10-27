@@ -9,6 +9,16 @@ if (function_exists('callNodeApi')) {
     $sidebarResp = callNodeApi('GET', '/chats');
     $sidebarTotalUnread = (int)($sidebarResp['total_unread'] ?? 0);
 }
+
+$curAvatarPath = $_SESSION['avatar_path'] ?? null;
+if (!$curAvatarPath && function_exists('callAuthApi')) {
+    $curProfile = callAuthApi('GET', '/profile', null, true);
+    if (!empty($curProfile['user']['avatar_path'])) {
+        $curAvatarPath = $curProfile['user']['avatar_path'];
+        $_SESSION['avatar_path'] = $curAvatarPath;
+    }
+}
+$curAvatarUrl = Helpers::avatarUrl($curAvatarPath);
 ?>
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-top">
@@ -18,7 +28,11 @@ if (function_exists('callNodeApi')) {
             <?php else: ?>
                 <div class="user-avatar-btn" id="profileBtn" title="Мой профиль">
                     <div class="avatar avatar-md">
-                        <?= mb_strtoupper(mb_substr($curDisplayName, 0, 1)) ?>
+                        <?php if ($curAvatarUrl): ?>
+                            <img src="<?= htmlspecialchars($curAvatarUrl) ?>" alt="Мой профиль" class="avatar-img">
+                        <?php else: ?>
+                            <?= mb_strtoupper(mb_substr($curDisplayName, 0, 1)) ?>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>

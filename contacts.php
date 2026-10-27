@@ -74,7 +74,7 @@ require __DIR__ . '/templates/partials/head.php';
                 <div class="contacts-list" id="incomingList">
                     <?php foreach ($incoming as $req): ?>
                     <div class="contact-item" data-id="<?= $req['contact_id'] ?>">
-                        <div class="avatar"><?= mb_strtoupper(mb_substr($req['username'], 0, 1)) ?></div>
+                        <?= Helpers::renderAvatar($req['avatar_path'] ?? null, $req['display_name'] ?: $req['username']) ?>
                         <div class="contact-info">
                             <div class="contact-name"><?= htmlspecialchars($req['display_name'] ?: $req['username']) ?></div>
                             <div class="contact-username">@<?= htmlspecialchars($req['username']) ?></div>
@@ -101,12 +101,12 @@ require __DIR__ . '/templates/partials/head.php';
                 <div class="contacts-list" id="contactsList">
                     <?php foreach ($accepted as $c): ?>
                     <div class="contact-item" data-id="<?= $c['contact_id'] ?>">
-                        <div class="avatar"><?= mb_strtoupper(mb_substr($c['username'], 0, 1)) ?></div>
+                        <?= Helpers::renderAvatar($c['avatar_path'] ?? null, $c['display_name'] ?: $c['username']) ?>
                         <div class="contact-info">
                             <div class="contact-name"><?= htmlspecialchars($c['display_name'] ?: $c['username']) ?></div>
                             <div class="contact-username">@<?= htmlspecialchars($c['username']) ?></div>
                             <?php if (!empty($c['status_text'])): ?>
-                                <div class="contact-status"><?= htmlspecialchars($c['status_text']) ?></div>
+                                <div class="contact-status">“<?= htmlspecialchars($c['status_text']) ?>”</div>
                             <?php endif; ?>
                         </div>
                         <div class="contact-actions">

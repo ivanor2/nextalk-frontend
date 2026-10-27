@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $searchResp = callAuthApi('GET', '/users/search?q=' . urlencode($cleanUname), null, true);
             if (!empty($searchResp['ok']) && !empty($searchResp['users'])) {
                 foreach ($searchResp['users'] as $found) {
-                    if (strcasecmp($found['username'], $cleanUname) === 0) {
+                    if (strcasecmp($found['username'], $cleanUname) === 0 || strcasecmp($found['display_name'] ?? '', $cleanUname) === 0) {
                         $foundId = (int)$found['id'];
                         if ($foundId !== $userId) {
                             $membersMap[$foundId] = [

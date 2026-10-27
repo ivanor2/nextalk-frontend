@@ -24,6 +24,17 @@ if (isset($contactsResp['ok']) && $contactsResp['ok']) {
 $defaultNode = defined('WS_NODE_URL') ? WS_NODE_URL : 'ws://127.0.0.1:3001';
 $userInit = mb_strtoupper(mb_substr($displayName, 0, 1));
 
+// Мой аватар
+$myAvatarPath = $_SESSION['avatar_path'] ?? null;
+if (!$myAvatarPath) {
+    $myProfile = callAuthApi('GET', '/profile', null, true);
+    if (!empty($myProfile['user']['avatar_path'])) {
+        $myAvatarPath = $myProfile['user']['avatar_path'];
+        $_SESSION['avatar_path'] = $myAvatarPath;
+    }
+}
+$myAvatarUrl = Helpers::avatarUrl($myAvatarPath);
+
 // Подсчёт общего числа непрочитанных
 $totalUnread = 0;
 foreach ($chats as $c) {
@@ -43,7 +54,11 @@ require __DIR__ . '/templates/partials/head.php';
     <div class="sidebar-top">
       <div class="sidebar-user">
         <a href="profile.php" class="avatar avatar-lg text-decoration-none" id="myAvatar" title="Мой профиль">
-          <?= $userInit ?>
+          <?php if ($myAvatarUrl): ?>
+            <img src="<?= htmlspecialchars($myAvatarUrl) ?>" alt="Мой профиль" class="avatar-img">
+          <?php else: ?>
+            <?= $userInit ?>
+          <?php endif; ?>
           <div class="online-dot"></div>
         </a>
         <div class="sidebar-user-info sidebar-user-pointer" onclick="window.location.href='profile.php'">
@@ -115,10 +130,24 @@ require __DIR__ . '/templates/partials/head.php';
 
             // Clean attachment markers in preview
             $lastMsg = Helpers::formatPreview($lastMsg);
+
+            $compAvUrl = null;
+            if (!$isGroup && !empty($chat['companion_id'])) {
+                $cid = (int)$chat['companion_id'];
+                if (!isset($cachedCompanionAvs[$cid])) {
+                    $uResp = callAuthApi('GET', "/users/$cid", null, true);
+                    $cachedCompanionAvs[$cid] = !empty($uResp['user']['avatar_path']) ? Helpers::avatarUrl($uResp['user']['avatar_path']) : false;
+                }
+                $compAvUrl = $cachedCompanionAvs[$cid] ?: null;
+            }
           ?>
           <a class="chat-item" href="chat.php?id=<?= $chat['id'] ?>" data-chat-id="<?= $chat['id'] ?>">
             <div class="avatar <?= $isGroup ? 'avatar-group-grad' : '' ?>">
-              <?= $initial ?>
+              <?php if ($compAvUrl): ?>
+                <img src="<?= htmlspecialchars($compAvUrl) ?>" alt="<?= htmlspecialchars($chatName) ?>" class="avatar-img">
+              <?php else: ?>
+                <?= $initial ?>
+              <?php endif; ?>
             </div>
             <div class="chat-item-body">
               <div class="chat-item-top">

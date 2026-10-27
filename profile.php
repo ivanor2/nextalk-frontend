@@ -49,15 +49,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'upload_avatar' && !empty($_FILES['avatar']['tmp_name'])) {
         $response = callAuthApiUpload('/profile/avatar', ['avatar' => $_FILES['avatar']]);
         if (isset($response['ok']) && $response['ok']) {
-            $success = 'Аватар обновлён';
             $user['avatar_path'] = $response['avatar_path'];
+            $_SESSION['avatar_path'] = $response['avatar_path'];
+
+            // Also save locally in frontend uploads directory
+            $destDir = __DIR__ . '/uploads/avatars';
+            if (!is_dir($destDir)) {
+                @mkdir($destDir, 0755, true);
+            }
+            $targetFile = $destDir . '/' . basename($response['avatar_path']);
+            @copy($_FILES['avatar']['tmp_name'], $targetFile);
+
+            $avatarUrl = Helpers::avatarUrl($user['avatar_path']);
+
+            if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) || (isset($_SERVER['HTTP_ACCEPT']) && str_contains($_SERVER['HTTP_ACCEPT'], 'application/json'))) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode([
+                    'ok' => true,
+                    'avatar_path' => $response['avatar_path'],
+                    'avatar_url' => $avatarUrl
+                ]);
+                exit;
+            }
+            $success = 'Аватар обновлён';
         } else {
-            $error = $response['error'] ?? 'Ошибка загрузки аватара';
+            $err = $response['error'] ?? 'Ошибка загрузки аватара';
+            if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) || (isset($_SERVER['HTTP_ACCEPT']) && str_contains($_SERVER['HTTP_ACCEPT'], 'application/json'))) {
+                header('Content-Type: application/json; charset=utf-8');
+                http_response_code(400);
+                echo json_encode(['ok' => false, 'error' => $err]);
+                exit;
+            }
+            $error = $err;
         }
     }
 }
 
-$avatarUrl = $user['avatar_path'] ? (AUTH_API_URL . '/' . $user['avatar_path']) : null;
+$avatarUrl = Helpers::avatarUrl($user['avatar_path'] ?? null);
+if (!empty($user['avatar_path'])) {
+    $_SESSION['avatar_path'] = $user['avatar_path'];
+}
 $initial = mb_strtoupper(mb_substr($user['display_name'] ?: $username, 0, 1));
 $defaultNode = defined('WS_NODE_URL') ? WS_NODE_URL : 'ws://127.0.0.1:3001';
 

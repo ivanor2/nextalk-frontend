@@ -765,6 +765,15 @@ footer a { color: var(--accent); font-size: 13px; }
   color: #fff;
   flex-shrink: 0;
   position: relative;
+  overflow: hidden;
+}
+
+.avatar img, .avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
 }
 
 .avatar-lg {
@@ -2791,4 +2800,101 @@ footer a { color: var(--accent); font-size: 13px; }
 }
 .fs-13 {
   font-size: 13px !important;
+}
+
+/* User Profile Bio & Member Details */
+.info-bio-card {
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-top: 6px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.info-bio-text {
+  font-style: italic;
+  color: var(--text-secondary);
+}
+.chat-bio-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.member-info-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.member-item-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.member-item-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+  font-style: italic;
+  margin-top: 2px;
+}
+.member-item-row {
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+}
+.member-item-row:hover {
+  background: var(--bg-hover);
+}
+.result-bio {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  margin-top: 2px;
+}
+.result-username {
+  font-size: 12px;
+  font-weight: normal;
+}
+.user-profile-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 8px 0;
+}
+.add-member-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  max-height: 200px;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+  margin-top: 4px;
+  display: none;
+}
+.add-member-dropdown.visible {
+  display: block;
 }

@@ -91,6 +91,51 @@ class ApiClient {
      */
     public static function callAuthUpload(string $endpoint, array $files, bool $useToken = true): array {
         $url = AUTH_API_URL . $endpoint;
+
+        // Use cURL if available (most robust for multipart file uploads)
+        if (extension_loaded('curl')) {
+            $ch = curl_init($url);
+            $postFields = [];
+            if ($useToken && isset($_SESSION['jwt_token'])) {
+                $postFields['token'] = $_SESSION['jwt_token'];
+            }
+            foreach ($files as $name => $file) {
+                if (empty($file['tmp_name']) || !file_exists($file['tmp_name'])) continue;
+                $mime = !empty($file['type']) ? $file['type'] : 'application/octet-stream';
+                $postFields[$name] = new CURLFile($file['tmp_name'], $mime, $file['name'] ?? 'file');
+            }
+
+            $curlHeaders = [
+                'Bypass-Tunnel-Reminder: true'
+            ];
+            if ($useToken && isset($_SESSION['jwt_token'])) {
+                $token = $_SESSION['jwt_token'];
+                $curlHeaders[] = "Authorization: Bearer $token";
+                $curlHeaders[] = "X-Auth-Token: Bearer $token";
+                $curlHeaders[] = "X-Authorization: Bearer $token";
+            }
+
+            curl_setopt_array($ch, [
+                CURLOPT_POST           => true,
+                CURLOPT_POSTFIELDS     => $postFields,
+                CURLOPT_HTTPHEADER     => $curlHeaders,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 15,
+            ]);
+
+            $result = curl_exec($ch);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+
+            if ($result !== false) {
+                $decoded = json_decode($result, true);
+                if (is_array($decoded)) {
+                    return $decoded;
+                }
+            }
+        }
+
+        // Fallback to stream context
         $boundary = '----' . md5(time());
         $body = '';
 
@@ -110,6 +155,7 @@ class ApiClient {
         $body .= "--$boundary--\r\n";
 
         $headers = "Content-Type: multipart/form-data; boundary=$boundary\r\n";
+        $headers .= "Content-Length: " . strlen($body) . "\r\n";
         if ($useToken && isset($_SESSION['jwt_token'])) {
             $token = $_SESSION['jwt_token'];
             $headers .= "Authorization: Bearer $token\r\n";

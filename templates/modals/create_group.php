@@ -40,9 +40,7 @@
               <label class="member-select-item">
                 <input type="checkbox" name="members[]" value="<?= $targetUserId ?>">
                 <input type="hidden" name="member_usernames[<?= $targetUserId ?>]" value="<?= $targetUsername ?>">
-                <div class="avatar avatar-xs">
-                  <?= mb_strtoupper(mb_substr($c['username'] ?? 'U', 0, 1)) ?>
-                </div>
+                <?= Helpers::renderAvatar($c['avatar_path'] ?? null, $c['username'] ?? 'U', 'avatar-xs') ?>
                 <span class="member-select-name"><?= $targetUsername ?></span>
               </label>
             <?php endforeach; ?>

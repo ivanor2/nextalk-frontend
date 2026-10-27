@@ -19,7 +19,19 @@ class Helpers {
         if (strpos($path, 'http://') === 0 || strpos($path, 'https://') === 0) {
             return $path;
         }
-        return AUTH_API_URL . '/' . ltrim($path, '/');
+        return 'api/avatar.php?path=' . urlencode(ltrim($path, '/'));
+    }
+
+    public static function renderAvatar(?string $avatarPath, ?string $name, string $sizeClass = '', string $extraClass = '', string $id = ''): string {
+        $url = self::avatarUrl($avatarPath);
+        $letter = self::avatarLetter($name);
+        $classes = trim('avatar ' . $sizeClass . ' ' . $extraClass);
+        $idAttr = $id ? ' id="' . self::e($id) . '"' : '';
+
+        if ($url) {
+            return '<div class="' . self::e($classes) . '"' . $idAttr . '><img src="' . self::e($url) . '" alt="' . self::e($name ?? '') . '" class="avatar-img"></div>';
+        }
+        return '<div class="' . self::e($classes) . '"' . $idAttr . '>' . $letter . '</div>';
     }
 
     public static function formatBytes(int $bytes): string {

@@ -38,6 +38,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['username'] = $response['username'];
             $_SESSION['display_name'] = $response['display_name'] ?? $response['username'];
             $_SESSION['jwt_token'] = $response['token'];
+            if (!empty($response['avatar_path'])) {
+                $_SESSION['avatar_path'] = $response['avatar_path'];
+            }
 
             if ($remember) {
                 $lifetime = $response['expires_in'] ?? 86400 * 28;
