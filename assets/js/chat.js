@@ -677,8 +677,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 cmdPaletteOverlay.classList.remove('open');
                 return;
             }
-            if (nodesModal && nodesModal.classList.contains('open')) {
-                nodesModal.classList.remove('open');
+            const currentNodesModal = document.getElementById('nodesModal');
+            if (currentNodesModal && currentNodesModal.classList.contains('open')) {
+                currentNodesModal.classList.remove('open');
+                return;
+            }
+            const currentAddMemberModal = document.getElementById('addMemberModal');
+            if (currentAddMemberModal && currentAddMemberModal.classList.contains('open')) {
+                currentAddMemberModal.classList.remove('open');
                 return;
             }
             if (chatInfoPanel && !chatInfoPanel.classList.contains('hidden')) {
@@ -837,26 +843,108 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ── Add Member Modal ──────────────────────────────────────
+    // ── Add Member Modal & Form ──────────────────────────────
     const openAddMemberBtn = document.getElementById('openAddMemberBtn');
+    const headerAddMemberBtn = document.getElementById('headerAddMemberBtn');
     const addMemberModal = document.getElementById('addMemberModal');
     const closeAddMemberModal = document.getElementById('closeAddMemberModal');
+    const addMemberForm = document.getElementById('addMemberForm');
+    const newMemberUsernameInput = document.getElementById('newMemberUsername');
 
-    if (openAddMemberBtn && addMemberModal) {
-        openAddMemberBtn.addEventListener('click', () => {
-            addMemberModal.classList.add('visible');
-            const inp = document.getElementById('newMemberUsername');
-            if (inp) inp.focus();
+    function openAddMemberDialog() {
+        if (!addMemberModal) return;
+        addMemberModal.classList.add('open');
+        if (newMemberUsernameInput) {
+            newMemberUsernameInput.value = '';
+            setTimeout(() => newMemberUsernameInput.focus(), 60);
+        }
+    }
+
+    function closeAddMemberDialog() {
+        if (!addMemberModal) return;
+        addMemberModal.classList.remove('open');
+    }
+
+    openAddMemberBtn?.addEventListener('click', openAddMemberDialog);
+    headerAddMemberBtn?.addEventListener('click', openAddMemberDialog);
+    closeAddMemberModal?.addEventListener('click', closeAddMemberDialog);
+
+    if (addMemberModal) {
+        addMemberModal.addEventListener('click', e => {
+            if (e.target === addMemberModal) {
+                closeAddMemberDialog();
+            }
         });
     }
 
-    if (closeAddMemberModal && addMemberModal) {
-        closeAddMemberModal.addEventListener('click', () => {
-            addMemberModal.classList.remove('visible');
-        });
-        addMemberModal.addEventListener('click', e => {
-            if (e.target === addMemberModal) {
-                addMemberModal.classList.remove('visible');
+    if (addMemberForm) {
+        addMemberForm.addEventListener('submit', async e => {
+            e.preventDefault();
+            const submitBtn = addMemberForm.querySelector('button[type="submit"]');
+            const usernameVal = newMemberUsernameInput ? newMemberUsernameInput.value.trim() : '';
+            if (!usernameVal) {
+                showToast('Введите имя пользователя', 'error');
+                return;
+            }
+
+            const originalBtnText = submitBtn ? submitBtn.textContent : '';
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Добавление...';
+            }
+
+            try {
+                const formData = new FormData(addMemberForm);
+                const resp = await fetch('api/add_chat_member.php', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json'
+                    },
+                    body: formData
+                });
+
+                const data = await resp.json().catch(() => null);
+
+                if (resp.ok && data && data.ok) {
+                    showToast('✅ Пользователь добавлен в группу!', 'success');
+                    closeAddMemberDialog();
+
+                    const addedName = data.username || usernameVal.replace(/^@/, '');
+                    const membersList = document.getElementById('chatMembersList');
+                    if (membersList) {
+                        const firstChar = (addedName.charAt(0) || 'U').toUpperCase();
+                        const row = document.createElement('div');
+                        row.className = 'member-item-row';
+                        row.innerHTML = `
+                            <div class="avatar avatar-sm">${escHtml(firstChar)}</div>
+                            <span class="member-item-name">${escHtml(addedName)}</span>
+                        `;
+                        membersList.appendChild(row);
+                    }
+
+                    // Update count indicators in UI
+                    const currentCount = membersList ? membersList.children.length : null;
+                    if (currentCount !== null) {
+                        const countTitle = document.getElementById('chatMembersCountTitle');
+                        if (countTitle) countTitle.textContent = `Участники (${currentCount})`;
+                        const cs = document.getElementById('chatStatus');
+                        if (cs) cs.textContent = `${currentCount} участников`;
+                        const ss = document.getElementById('sidebarStatus');
+                        if (ss) ss.textContent = `${currentCount} участников`;
+                    }
+                } else {
+                    const err = (data && data.error) ? data.error : 'Не удалось добавить участника';
+                    showToast('❌ ' + err, 'error');
+                }
+            } catch (err) {
+                console.error('Failed to add member:', err);
+                showToast('❌ Ошибка сети при добавлении пользователя', 'error');
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = originalBtnText;
+                }
             }
         });
     }

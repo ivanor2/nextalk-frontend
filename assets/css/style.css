@@ -1331,7 +1331,8 @@ footer a { color: var(--accent); font-size: 13px; }
   transition: opacity var(--t-base);
 }
 
-.modal-overlay.open {
+.modal-overlay.open,
+.modal-overlay.visible {
   opacity: 1;
   pointer-events: all;
 }
@@ -1348,7 +1349,8 @@ footer a { color: var(--accent); font-size: 13px; }
   transition: transform var(--t-slow);
 }
 
-.modal-overlay.open .modal { transform: scale(1) translateY(0); }
+.modal-overlay.open .modal,
+.modal-overlay.visible .modal { transform: scale(1) translateY(0); }
 
 .modal h3 {
   font-size: 20px;

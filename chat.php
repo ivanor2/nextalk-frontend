@@ -165,6 +165,9 @@ require __DIR__ . '/templates/partials/head.php';
           <div class="node-dot connecting" id="nodeIndicatorDot"></div>
           <span id="nodeIndicatorText">Узел</span>
         </div>
+        <?php if ($isGroup): ?>
+          <button class="icon-btn" id="headerAddMemberBtn" title="Добавить участника в группу">➕</button>
+        <?php endif; ?>
         <button class="icon-btn" id="refreshBtn" title="Обновить сообщения">↻</button>
         <button class="icon-btn" id="toggleInfoBtn" title="Информация о чате">ℹ️</button>
       </div>
@@ -252,7 +255,7 @@ require __DIR__ . '/templates/partials/head.php';
     <?php if ($isGroup): ?>
       <div class="info-panel-section">
         <div class="info-section-title flex-between">
-          <span>Участники (<?= count($members) ?>)</span>
+          <span id="chatMembersCountTitle">Участники (<?= count($members) ?>)</span>
           <button class="btn btn-ghost btn-pill-xs" id="openAddMemberBtn" title="Добавить участника">➕ Добавить</button>
         </div>
         <div class="flex-col-gap-8" id="chatMembersList">
@@ -374,5 +377,14 @@ window.CHAT_CONFIG = {
 </script>
 <script src="assets/js/app.js"></script>
 <script src="assets/js/chat.js"></script>
+<?php if (!empty($_GET['error'])): ?>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (typeof showToast === 'function') {
+      showToast(<?= json_encode($_GET['error']) ?>, 'error');
+    }
+  });
+</script>
+<?php endif; ?>
 </body>
 </html>
