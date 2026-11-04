@@ -196,7 +196,34 @@
     return hex.match(/.{1,4}/g).join(' ');
   }
 
-  function chainInfo(chatId, participantId) { return `nt:v1:ck:${chatId}:${participantId}`; }
+  /** base64url (как в JWK) → Uint8Array. */
+  function unb64url(str) {
+    let s = String(str).replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4 !== 0) s += '=';
+    return unb64(s);
+  }
+
+  /** Проверка пары: raw uncompressed point (0x04 || x || y) соответствует JWK-координатам привата. */
+  function publicKeyMatchesPrivate(pubB64, privJwk) {
+    const raw = unb64(pubB64);
+    if (raw.length !== 65 || raw[0] !== 0x04) return false;
+    if (!privJwk || privJwk.crv !== 'P-256' || !privJwk.x || !privJwk.y) return false;
+    const x = unb64url(privJwk.x);
+    const y = unb64url(privJwk.y);
+    if (x.length !== 32 || y.length !== 32) return false;
+    for (let i = 0; i < 32; i++) {
+      if (x[i] !== raw[1 + i] || y[i] !== raw[33 + i]) return false;
+    }
+    return true;
+  }
+
+  /**
+   * HKDF-«info» одинаков для обеих сторон: id чата + ratchet-ключ отправителя + tag
+   * ключа получателя. Sender и receiver вычисляют его без передачи идентификаторов.
+   */
+  function chainInfo(chatId, senderRatchetPub, recipientTag) {
+    return `nt:v1:ck:${chatId}:${senderRatchetPub}:${recipientTag}`;
+  }
 
   // ── Долговременные identity-ключи пользователя ────────────────────────────
   function identityRecords() { return readJson(IDENTITY_STORE, {}); }
@@ -254,9 +281,9 @@
     session.out = { pub: keys.pub, priv_jwk: keys.privJwk, prev: prev, peers: {}, needs_rotate: false };
   }
 
-  async function sendChainKey(session, chatId, peerId, peerPub) {
+  async function sendChainKey(session, chatId, recipientTag, peerPub) {
     const priv = await privateKeyFromJwk(session.out.priv_jwk);
-    return hkdf(await deriveSecret(priv, peerPub), chainInfo(chatId, peerId), 32);
+    return hkdf(await deriveSecret(priv, peerPub), chainInfo(chatId, session.out.pub, recipientTag), 32);
   }
 
   /** Приватный ключ получателя, corresponding to tag inside the envelope. */
@@ -341,10 +368,11 @@
 
         let state = sess.out.peers[peerId];
         if (!state || state.peer_pub !== peerPub) {
+          const tag = await tagOf(peerPub);
           state = {
             peer_pub: peerPub,
-            tag: await tagOf(peerPub),
-            chain_key: b64(await sendChainKey(sess, chatId, peerId, peerPub)),
+            tag: tag,
+            chain_key: b64(await sendChainKey(sess, chatId, tag, peerPub)),
             counter: 0
           };
           sess.out.peers[peerId] = state;
@@ -402,7 +430,7 @@
       if (fresh) {
         const priv = await resolveOwnPrivateKey(sess, entry.tag, identityRecord);
         if (!priv) throw new Error('Ключ рэтчета уже удалён — сообщение не расшифровывается на этом устройстве');
-        chain = await hkdf(await deriveSecret(priv, entry.ratchet), chainInfo(chatId, senderKey), 32);
+        chain = await hkdf(await deriveSecret(priv, entry.ratchet), chainInfo(chatId, entry.ratchet, entry.tag), 32);
         counter = 0;
         skipped = {};
       } else {
@@ -425,7 +453,12 @@
       }
 
       const aesKey = await hkdf(await chainMessageKey(chain), 'nt:v1:aes', 32);
-      const plain = DEC.decode(await aesDecrypt(aesKey, entry.iv, entry.ciphertext));
+      let plain;
+      try {
+        plain = DEC.decode(await aesDecrypt(aesKey, entry.iv, entry.ciphertext));
+      } catch (e) {
+        throw new Error('Сообщение не расшифровывается: ключ или данные повреждены (AES-GCM auth tag)');
+      }
 
       sess.in[senderKey] = {
         ratchet: entry.ratchet,
@@ -543,13 +576,18 @@
       const bits = new Uint8Array(await subtle.deriveBits({
         name: 'PBKDF2', salt: unb64(file.salt), iterations: Number(file.iterations || 210000), hash: 'SHA-256'
       }, pwKey, 256));
-      payload = JSON.parse(DEC.decode(await aesDecrypt(bits, unb64(file.nonce), unb64(file.ciphertext))));
+      let decrypted;
+      try {
+        decrypted = DEC.decode(await aesDecrypt(bits, unb64(file.nonce), unb64(file.ciphertext)));
+      } catch (e) {
+        throw new Error('Неверный пароль или файл ключей повреждён');
+      }
+      payload = JSON.parse(decrypted);
     } else {
       payload = file.keys;
     }
     if (!payload || !payload.public_key || !payload.private_key) throw new Error('Файл ключей повреждён');
-    const publicJwk = await subtle.exportKey('jwk', await peerPublicKey(payload.public_key));
-    if (payload.private_key.x !== publicJwk.x || payload.private_key.y !== publicJwk.y) {
+    if (!publicKeyMatchesPrivate(payload.public_key, payload.private_key)) {
       throw new Error('Приватный ключ из файла не соответствует публичному ключу');
     }
     const username = String(payload.username || '');
