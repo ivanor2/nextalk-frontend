@@ -93,8 +93,8 @@ require __DIR__ . '/templates/partials/head.php';
       <a href="sessions.php" class="btn btn-ghost btn-pill-sm">
         📱 Сеансы
       </a>
-      <a href="nodes.php" class="btn btn-ghost btn-pill-sm">
-        🌐 Узлы
+      <a href="settings.php" class="btn btn-ghost btn-pill-sm">
+        ⚙️ Настройки
       </a>
     </div>
 
@@ -277,10 +277,10 @@ require __DIR__ . '/templates/partials/head.php';
         <span>Контакты и поиск</span>
         <span class="cmd-badge">Перейти</span>
       </div>
-      <div class="cmd-item" onclick="window.location.href='nodes.php'">
-        <span>🌐</span>
-        <span>Каталог узлов сети</span>
-        <span class="cmd-badge">Сеть</span>
+      <div class="cmd-item" onclick="window.location.href='profile.php'">
+        <span>👤</span>
+        <span>Мой профиль</span>
+        <span class="cmd-badge">Перейти</span>
       </div>
       <div class="cmd-item" onclick="window.location.href='settings.php'">
         <span>⚙️</span>
@@ -291,11 +291,6 @@ require __DIR__ . '/templates/partials/head.php';
         <span>📱</span>
         <span>Активные сеансы</span>
         <span class="cmd-badge">Безопасность</span>
-      </div>
-      <div class="cmd-item" onclick="window.location.href='install.php'">
-        <span>🚀</span>
-        <span>Установить свой узел</span>
-        <span class="cmd-badge">Инструкция</span>
       </div>
     </div>
   </div>

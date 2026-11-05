@@ -79,18 +79,6 @@ $curAvatarUrl = Helpers::avatarUrl($curAvatarPath);
                 <div class="chat-item-name">Сеансы</div>
             </div>
         </a>
-        <a href="nodes.php" class="chat-item <?= $activeTab === 'nodes' ? 'active' : '' ?>">
-            <span class="sidebar-icon">🌐</span>
-            <div class="chat-item-body">
-                <div class="chat-item-name">Узлы сети</div>
-            </div>
-        </a>
-        <a href="rules.php" class="chat-item <?= $activeTab === 'rules' ? 'active' : '' ?>">
-            <span class="sidebar-icon">📜</span>
-            <div class="chat-item-body">
-                <div class="chat-item-name">Правила</div>
-            </div>
-        </a>
     </div>
 
     <div class="sidebar-bottom">

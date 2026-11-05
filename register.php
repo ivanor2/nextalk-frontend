@@ -22,26 +22,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
     $passwordConfirm = $_POST['password_confirm'] ?? '';
-    $homeNodeId = (int)($_POST['home_node_id'] ?? 0);
+    $homeNodeId = (int) ($_POST['home_node_id'] ?? 0);
     $agree = isset($_POST['agree']);
 
     // Client-side validation (redundant with server but good UX)
-    if (!$username) $errors['username'] = 'Логин обязателен';
-    elseif (!preg_match('/^[a-zA-Z0-9_]{3,32}$/', $username)) $errors['username'] = 'Логин: 3–32 символа, латиница, цифры, _';
+    if (!$username)
+        $errors['username'] = 'Логин обязателен';
+    elseif (!preg_match('/^[a-zA-Z0-9_]{3,32}$/', $username))
+        $errors['username'] = 'Логин: 3–32 символа, латиница, цифры, _';
 
-    if (!$displayName) $errors['display_name'] = 'Отображаемое имя обязательно';
-    elseif (mb_strlen($displayName) > 64) $errors['display_name'] = 'Максимум 64 символа';
+    if (!$displayName)
+        $errors['display_name'] = 'Отображаемое имя обязательно';
+    elseif (mb_strlen($displayName) > 64)
+        $errors['display_name'] = 'Максимум 64 символа';
 
-    if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Некорректный формат e-mail';
+    if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL))
+        $errors['email'] = 'Некорректный формат e-mail';
 
-    if (!$password) $errors['password'] = 'Пароль обязателен';
-    elseif (strlen($password) < 10) $errors['password'] = 'Минимум 10 символов';
+    if (!$password)
+        $errors['password'] = 'Пароль обязателен';
+    elseif (strlen($password) < 10)
+        $errors['password'] = 'Минимум 10 символов';
     elseif (!preg_match('/[a-zA-Z]/', $password) || !preg_match('/[0-9]/', $password))
         $errors['password'] = 'Пароль должен содержать буквы и цифры';
 
-    if ($password !== $passwordConfirm) $errors['password_confirm'] = 'Пароли не совпадают';
+    if ($password !== $passwordConfirm)
+        $errors['password_confirm'] = 'Пароли не совпадают';
 
-    if (!$agree) $errors['agree'] = 'Необходимо принять правила';
+    if (!$agree)
+        $errors['agree'] = 'Необходимо принять правила';
 
     if (empty($errors)) {
         // По ТЗ раздел 6.6: узел проксирует запрос на сервер авторизации
@@ -83,122 +92,166 @@ $metaDescription = 'Создайте аккаунт в NexTalk — децент�
 $bodyClass = 'auth-body';
 require __DIR__ . '/templates/partials/head.php';
 ?>
-    <div class="auth-card auth-card-wide">
-        <div class="auth-logo">
-            <div class="logo-icon">💬</div>
-            <div class="logo-text">Nex<em>Talk</em></div>
-        </div>
-
-        <h2>Создать аккаунт</h2>
-        <p class="auth-subtitle">Зарегистрируйтесь, чтобы начать общение</p>
-
-        <?php if (!empty($errors['general'])): ?>
-            <div class="alert alert-error">⚠️ <?= htmlspecialchars($errors['general']) ?></div>
-        <?php endif; ?>
-
-        <form method="POST" id="registerForm" novalidate>
-            <div class="field">
-                <label for="username">Логин</label>
-                <input type="text" id="username" name="username" required
-                       pattern="[a-zA-Z0-9_]{3,32}"
-                       placeholder="my_login"
-                       value="<?= htmlspecialchars($_POST['username'] ?? '') ?>"
-                       class="<?= isset($errors['username']) ? 'error-input' : '' ?>">
-                <?php if (isset($errors['username'])): ?>
-                    <div class="field-error"><?= htmlspecialchars($errors['username']) ?></div>
-                <?php else: ?>
-                    <div class="field-hint">3–32 символа: латиница, цифры, _</div>
-                <?php endif; ?>
-            </div>
-
-            <div class="field">
-                <label for="display_name">Отображаемое имя</label>
-                <input type="text" id="display_name" name="display_name" required
-                       maxlength="64"
-                       placeholder="Как вас называть в чатах"
-                       value="<?= htmlspecialchars($_POST['display_name'] ?? '') ?>"
-                       class="<?= isset($errors['display_name']) ? 'error-input' : '' ?>">
-                <?php if (isset($errors['display_name'])): ?>
-                    <div class="field-error"><?= htmlspecialchars($errors['display_name']) ?></div>
-                <?php endif; ?>
-            </div>
-
-            <div class="field">
-                <label for="email">E-mail</label>
-                <input type="email" id="email" name="email"
-                       placeholder="user@example.com"
-                       value="<?= htmlspecialchars($_POST['email'] ?? '') ?>"
-                       class="<?= isset($errors['email']) ? 'error-input' : '' ?>">
-                <?php if (isset($errors['email'])): ?>
-                    <div class="field-error"><?= htmlspecialchars($errors['email']) ?></div>
-                <?php endif; ?>
-            </div>
-
-            <div class="field">
-                <label for="password">Пароль</label>
-                <div class="password-wrap">
-                    <input type="password" id="password" name="password" required
-                           minlength="10"
-                           placeholder="Минимум 10 символов, буквы + цифры"
-                           class="<?= isset($errors['password']) ? 'error-input' : '' ?>">
-                    <button type="button" class="password-toggle" id="togglePass" tabindex="-1">👁</button>
-                </div>
-                <div class="password-strength" id="passwordStrength">
-                    <div class="strength-bar"><div class="strength-fill" id="strengthFill"></div></div>
-                    <span class="strength-label" id="strengthLabel"></span>
-                </div>
-                <?php if (isset($errors['password'])): ?>
-                    <div class="field-error"><?= htmlspecialchars($errors['password']) ?></div>
-                <?php endif; ?>
-            </div>
-
-            <div class="field">
-                <label for="password_confirm">Повторите пароль</label>
-                <input type="password" id="password_confirm" name="password_confirm" required
-                       placeholder="Ещё раз тот же пароль"
-                       class="<?= isset($errors['password_confirm']) ? 'error-input' : '' ?>">
-                <?php if (isset($errors['password_confirm'])): ?>
-                    <div class="field-error"><?= htmlspecialchars($errors['password_confirm']) ?></div>
-                <?php endif; ?>
-            </div>
-
-            <div class="field">
-                <label for="home_node_id">Домашний узел</label>
-                <select id="home_node_id" name="home_node_id" class="select-field">
-                    <?php if (empty($nodes)): ?>
-                        <option value="0">Узел по умолчанию</option>
-                    <?php else: ?>
-                        <?php foreach ($nodes as $node): ?>
-                            <option value="<?= $node['id'] ?>"
-                                <?= (isset($_POST['home_node_id']) && $_POST['home_node_id'] == $node['id']) ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($node['name']) ?>
-                                <?php if (!empty($node['user_count'])): ?>
-                                    (<?= $node['user_count'] ?> польз.)
-                                <?php endif; ?>
-                            </option>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </select>
-                <div class="field-hint">Узел, через который будут передаваться ваши сообщения</div>
-            </div>
-
-            <div class="field-check">
-                <input type="checkbox" id="agree" name="agree" <?= isset($_POST['agree']) ? 'checked' : '' ?>>
-                <label for="agree">Я принимаю <a href="rules.php" target="_blank">правила использования</a> и <a href="rules.php#privacy" target="_blank">политику конфиденциальности</a></label>
-            </div>
-            <?php if (isset($errors['agree'])): ?>
-                <div class="field-error field-error-agree"><?= htmlspecialchars($errors['agree']) ?></div>
-            <?php endif; ?>
-
-            <button type="submit" class="btn-submit" id="submitBtn">Зарегистрироваться</button>
-        </form>
-
-        <div class="auth-switch">
-            Уже есть аккаунт? <a href="login.php">Войти</a>
-        </div>
+<div class="auth-card auth-card-wide">
+    <div class="auth-logo">
+        <div class="logo-icon">💬</div>
+        <div class="logo-text">Nex<em>Talk</em></div>
     </div>
 
-    <script src="assets/js/app.js"></script>
-    <script src="assets/js/auth.js"></script>
+    <h2>Создать аккаунт</h2>
+    <p class="auth-subtitle">Зарегистрируйтесь, чтобы начать общение</p>
+
+    <?php if (!empty($errors['general'])): ?>
+        <div class="alert alert-error">⚠️ <?= htmlspecialchars($errors['general']) ?></div>
+    <?php endif; ?>
+
+    <form method="POST" id="registerForm" novalidate>
+        <div class="field">
+            <label for="username">Логин</label>
+            <input type="text" id="username" name="username" required pattern="[a-zA-Z0-9_]{3,32}"
+                placeholder="my_login" value="<?= htmlspecialchars($_POST['username'] ?? '') ?>"
+                class="<?= isset($errors['username']) ? 'error-input' : '' ?>">
+            <?php if (isset($errors['username'])): ?>
+                <div class="field-error"><?= htmlspecialchars($errors['username']) ?></div>
+            <?php else: ?>
+                <div class="field-hint">3–32 символа: латиница, цифры, _</div>
+            <?php endif; ?>
+        </div>
+
+        <div class="field">
+            <label for="display_name">Отображаемое имя</label>
+            <input type="text" id="display_name" name="display_name" required maxlength="64"
+                placeholder="Как вас называть в чатах" value="<?= htmlspecialchars($_POST['display_name'] ?? '') ?>"
+                class="<?= isset($errors['display_name']) ? 'error-input' : '' ?>">
+            <?php if (isset($errors['display_name'])): ?>
+                <div class="field-error"><?= htmlspecialchars($errors['display_name']) ?></div>
+            <?php endif; ?>
+        </div>
+
+        <div class="field">
+            <label for="email">E-mail</label>
+            <input type="email" id="email" name="email" placeholder="user@example.com"
+                value="<?= htmlspecialchars($_POST['email'] ?? '') ?>"
+                class="<?= isset($errors['email']) ? 'error-input' : '' ?>">
+            <?php if (isset($errors['email'])): ?>
+                <div class="field-error"><?= htmlspecialchars($errors['email']) ?></div>
+            <?php endif; ?>
+        </div>
+
+        <div class="field">
+            <label for="password">Пароль</label>
+            <div class="password-wrap">
+                <input type="password" id="password" name="password" required minlength="10"
+                    placeholder="Минимум 10 символов, буквы + цифры"
+                    class="<?= isset($errors['password']) ? 'error-input' : '' ?>">
+                <button type="button" class="password-toggle" id="togglePass" tabindex="-1">👁</button>
+            </div>
+            <div class="password-strength" id="passwordStrength">
+                <div class="strength-bar">
+                    <div class="strength-fill" id="strengthFill"></div>
+                </div>
+                <span class="strength-label" id="strengthLabel"></span>
+            </div>
+            <?php if (isset($errors['password'])): ?>
+                <div class="field-error"><?= htmlspecialchars($errors['password']) ?></div>
+            <?php endif; ?>
+        </div>
+
+        <div class="field">
+            <label for="password_confirm">Повторите пароль</label>
+            <input type="password" id="password_confirm" name="password_confirm" required
+                placeholder="Ещё раз тот же пароль"
+                class="<?= isset($errors['password_confirm']) ? 'error-input' : '' ?>">
+            <?php if (isset($errors['password_confirm'])): ?>
+                <div class="field-error"><?= htmlspecialchars($errors['password_confirm']) ?></div>
+            <?php endif; ?>
+        </div>
+
+        <div class="field">
+            <label for="home_node_id">Домашний узел</label>
+            <select id="home_node_id" name="home_node_id" class="select-field">
+                <?php if (empty($nodes)): ?>
+                    <option value="0">Узел по умолчанию</option>
+                <?php else: ?>
+                    <?php foreach ($nodes as $node): ?>
+                        <option value="<?= $node['id'] ?>" <?= (isset($_POST['home_node_id']) && $_POST['home_node_id'] == $node['id']) ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($node['name']) ?>
+                            <?php if (!empty($node['user_count'])): ?>
+                                (<?= $node['user_count'] ?> польз.)
+                            <?php endif; ?>
+                        </option>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </select>
+            <div class="field-hint">Узел, через который будут передаваться ваши сообщения</div>
+        </div>
+
+        <div class="field-check">
+            <input type="checkbox" id="agree" name="agree" <?= isset($_POST['agree']) ? 'checked' : '' ?>>
+            <label for="agree">Я принимаю <a href="landing/rules.html" target="_blank" id="rulesLink">правила
+                    использования</a> и <a href="landing/rules.html#privacy" target="_blank">политику
+                    конфиденциальности</a></label>
+        </div>
+        <?php if (isset($errors['agree'])): ?>
+            <div class="field-error field-error-agree"><?= htmlspecialchars($errors['agree']) ?></div>
+        <?php endif; ?>
+
+        <button type="submit" class="btn-submit" id="submitBtn">Зарегистрироваться</button>
+    </form>
+
+    <div class="auth-switch">
+        Уже есть аккаунт? <a href="login.php">Войти</a>
+    </div>
+</div>
+
+<!-- Rules Modal for convenience -->
+<div class="modal-overlay" id="rulesModal">
+    <div class="modal modal-max-md">
+        <button class="icon-btn modal-close" id="closeRules">✕</button>
+        <h3>📜 Правила и безопасность NexTalk</h3>
+        <div class="rules-modal-body"
+            style="max-height: 320px; overflow-y: auto; font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 16px 0; padding-right: 8px;">
+            <p><strong>1. Децентрализация:</strong> Сообщения передаются через независимые узлы сети.</p>
+            <p><strong>2. E2E-шифрование:</strong> Ваши сообщения шифруются на клиенте с помощью Web Crypto API. Ключи
+                хранятся только у вас в IndexedDB.</p>
+            <p><strong>3. Приватность:</strong> Мы не продаём и не анализируем ваши данные. Узлы не видят текст
+                переписки.</p>
+            <p><strong>4. Запрещено:</strong> Спам, распространение вредоносного ПО и атаки на сетевые узлы.</p>
+        </div>
+        <button class="btn btn-primary" id="acceptRulesBtn" style="width: 100%;">Понятно, я согласен</button>
+    </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+<script src="assets/js/auth.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const rulesModal = document.getElementById('rulesModal');
+        const rulesLink = document.getElementById('rulesLink');
+        const closeRules = document.getElementById('closeRules');
+        const acceptBtn = document.getElementById('acceptRulesBtn');
+        const agreeCheck = document.getElementById('agree');
+
+        if (rulesLink && rulesModal) {
+            rulesLink.addEventListener('click', (e) => {
+                // If ctrl/meta key not pressed, open modal directly for instant reading
+                if (!e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    rulesModal.classList.add('open');
+                }
+            });
+        }
+        if (closeRules && rulesModal) {
+            closeRules.addEventListener('click', () => rulesModal.classList.remove('open'));
+        }
+        if (acceptBtn && rulesModal) {
+            acceptBtn.addEventListener('click', () => {
+                rulesModal.classList.remove('open');
+                if (agreeCheck) agreeCheck.checked = true;
+            });
+        }
+    });
+</script>
 </body>
+
 </html>

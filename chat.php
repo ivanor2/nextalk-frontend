@@ -465,14 +465,19 @@ require __DIR__ . '/templates/partials/head.php';
         <span>Контакты и поиск людей</span>
         <span class="cmd-badge">Перейти</span>
       </div>
-      <div class="cmd-item" onclick="window.location.href='nodes.php'">
-        <span>🌐</span>
-        <span>Каталог узлов</span>
-        <span class="cmd-badge">Сеть</span>
+      <div class="cmd-item" onclick="window.location.href='profile.php'">
+        <span>👤</span>
+        <span>Мой профиль</span>
+        <span class="cmd-badge">Перейти</span>
       </div>
       <div class="cmd-item" onclick="window.location.href='settings.php'">
         <span>⚙️</span>
         <span>Настройки и ключи</span>
+        <span class="cmd-badge">Перейти</span>
+      </div>
+      <div class="cmd-item" onclick="window.location.href='sessions.php'">
+        <span>📱</span>
+        <span>Сеансы и безопасность</span>
         <span class="cmd-badge">Перейти</span>
       </div>
     </div>
