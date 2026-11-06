@@ -59,22 +59,72 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const username = (window.SETTINGS_CONFIG && window.SETTINGS_CONFIG.username) || '';
+
+    async function refreshKeysStatus() {
+        const st = document.getElementById('keysStatus');
+        if (!st) return;
+        const diag = window.E2EE && E2EE.diagnose ? E2EE.diagnose() : { ok: window.E2EE && E2EE.available() };
+        if (!diag.ok) {
+            if (diag.reason === 'insecure_context') {
+                const httpsUrl = 'https://' + location.host + location.pathname;
+                st.innerHTML = `
+                    <div style="margin-top:10px; padding:12px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; font-size:13px; line-height:1.5;">
+                        <strong style="color:#ef4444;">⚠️ Браузер отключил Web Crypto API на HTTP</strong><br>
+                        Все современные браузеры (Chrome, Edge, Firefox) требуют безопасный контекст (HTTPS или localhost) для работы криптографии.<br>
+                        👉 <a href="${httpsUrl}" style="color:var(--accent); font-weight:600; text-decoration:underline;">Открыть страницу через HTTPS (${location.host})</a>
+                        или добавьте адрес в <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>.
+                    </div>
+                `;
+            } else {
+                st.innerHTML = '<span class="text-danger">⚠️ Web Crypto API недоступен в этом браузере</span>';
+            }
+            return;
+        }
+        if (!username) return;
+        try {
+            await E2EE.ensureIdentity(username);
+            const info = await E2EE.identityInfo(username);
+            if (info && info.public_key) {
+                st.innerHTML = `
+                    <div class="keys-info-active">
+                        <div class="keys-fp-row">
+                            <span class="keys-fp-label">Отпечаток ключа (Fingerprint):</span>
+                            <code class="keys-fp-val">${info.fingerprint}</code>
+                        </div>
+                        <div class="keys-desc-sub">
+                            ✓ Ключи активны на этом устройстве (ECDH P-256 + Double Ratchet)
+                        </div>
+                    </div>
+                `;
+            }
+        } catch (e) {
+            st.textContent = 'Ошибка загрузки статуса ключей: ' + e.message;
+        }
+    }
+
+    refreshKeysStatus();
+
     // Export keys
     const exportBtn = document.getElementById('exportKeysBtn');
     if (exportBtn) {
-        exportBtn.addEventListener('click', () => {
+        exportBtn.addEventListener('click', async () => {
+            if (!window.E2EE || !username) return;
             try {
-                const keys = { note: 'NexTalk E2E Keys Export', exported_at: new Date().toISOString() };
-                const blob = new Blob([JSON.stringify(keys, null, 2)], { type: 'application/json' });
+                const pass = prompt('Введите пароль для защиты файла ключей (или оставьте пустым для экспорта без пароля):');
+                if (pass === null) return;
+
+                const exported = await E2EE.exportIdentity(username, pass);
+                const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `nextalk-keys-${Date.now()}.json`;
+                a.download = `nextalk-keys-${username}-${Date.now()}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
-                showToast('✅ Ключи экспортированы', 'success');
+                showToast('✅ Ключи экспортированы' + (pass ? ' (зашифрованы паролем)' : ''), 'success');
             } catch (e) {
-                showToast('❌ Ошибка экспорта', 'error');
+                showToast('❌ Ошибка экспорта: ' + e.message, 'error');
             }
         });
     }
@@ -89,12 +139,26 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!file) return;
             try {
                 const text = await file.text();
-                JSON.parse(text);
+                const json = JSON.parse(text);
+                let pass = '';
+                if (json.encrypted) {
+                    pass = prompt('Файл защищен паролем. Введите пароль для расшифровки:');
+                    if (pass === null) { importFile.value = ''; return; }
+                }
+
+                const res = await E2EE.importIdentity(json, pass);
+                await fetch('api/sync_key.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ public_key: res.public_key })
+                }).catch(() => {});
+
                 showToast('✅ Ключи импортированы', 'success');
-                const st = document.getElementById('keysStatus');
-                if (st) st.textContent = 'Ключи импортированы из ' + file.name;
+                await refreshKeysStatus();
             } catch (err) {
-                showToast('❌ Некорректный файл ключей', 'error');
+                showToast('❌ Ошибка импорта: ' + err.message, 'error');
+            } finally {
+                importFile.value = '';
             }
         });
     }
@@ -102,11 +166,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Generate keys
     const genBtn = document.getElementById('generateKeysBtn');
     if (genBtn) {
-        genBtn.addEventListener('click', () => {
+        genBtn.addEventListener('click', async () => {
+            if (!window.E2EE || !username) return;
             if (!confirm('Сгенерировать новую пару ключей? Старые сообщения нельзя будет расшифровать!')) return;
-            showToast('🔄 Новые ключи сгенерированы', 'success');
-            const st = document.getElementById('keysStatus');
-            if (st) st.textContent = 'Новая пара ключей создана ' + new Date().toLocaleString();
+            try {
+                const fresh = await E2EE.regenerateIdentity(username);
+                await fetch('api/sync_key.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ public_key: fresh.pub })
+                }).catch(() => {});
+
+                showToast('🔄 Новая пара ключей создана и сохранена', 'success');
+                await refreshKeysStatus();
+            } catch (e) {
+                showToast('❌ Ошибка генерации: ' + e.message, 'error');
+            }
         });
     }
 

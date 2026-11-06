@@ -36,14 +36,35 @@
   const IDENTITY_STORE = 'nt-e2e-identity-v1';
   const RATCHET_STORE = 'nt-e2e-ratchet-v1';
   const SENT_CACHE_STORE = 'nt-e2e-sent-cache-v1';
+  const DECRYPTED_CACHE_STORE = 'nt-e2e-decrypted-cache-v1';
   const MAX_PREV_RATCHETS = 6;
   const MAX_SKIPPED_KEYS = 40;
   const MAX_SENT_CACHE = 200;
+  const MAX_DECRYPTED_CACHE = 500;
 
   function available() {
     return !!(subtle && typeof subtle.generateKey === 'function'
       && typeof subtle.deriveBits === 'function'
       && typeof subtle.importKey === 'function');
+  }
+
+  function diagnose() {
+    if (available()) return { ok: true };
+    const isSec = typeof globalScope.isSecureContext !== 'undefined' ? globalScope.isSecureContext : null;
+    const proto = globalScope.location ? globalScope.location.protocol : '';
+    const host = globalScope.location ? globalScope.location.hostname : '';
+    if (isSec === false || (proto === 'http:' && host !== 'localhost' && host !== '127.0.0.1')) {
+      return {
+        ok: false,
+        reason: 'insecure_context',
+        message: 'Браузер блокирует Web Crypto API на незащищённых HTTP-доменах (требуется HTTPS или http://localhost).'
+      };
+    }
+    return {
+      ok: false,
+      reason: 'unsupported',
+      message: 'Web Crypto API не поддерживается в этом браузере.'
+    };
   }
 
   // ── Байтовые утилиты ────────────────────────────────────────────────
@@ -349,7 +370,7 @@
   function withQueue(key, fn) {
     const previous = queues.get(key) || Promise.resolve();
     const next = previous.then(fn, fn);
-    queues.set(key, next.catch(() => {}));
+    queues.set(key, next.catch(() => { }));
     return next;
   }
 
@@ -408,7 +429,11 @@
   async function decrypt(chatId, senderId, fields, username, myUserId) {
     if (!available()) throw new Error('Web Crypto API недоступен в этом браузере');
     if (!fields || !fields.ciphertext) throw new Error('Сообщение не зашифровано');
+    const cached = cachedDecrypted(username, fields.ciphertext, myUserId);
+    if (cached !== null) return cached;
     return withQueue(`${username}:${chatId}`, async () => {
+      const secondCheck = cachedDecrypted(username, fields.ciphertext, myUserId);
+      if (secondCheck !== null) return secondCheck;
       const unpacked = unpackEnvelope(unb64(fields.ciphertext));
       let entry = null;
       if (unpacked.chatType === 'group') {
@@ -429,7 +454,7 @@
       let skipped;
       if (fresh) {
         const priv = await resolveOwnPrivateKey(sess, entry.tag, identityRecord);
-        if (!priv) throw new Error('Ключ рэтчета уже удалён — сообщение не расшифровывается на этом устройстве');
+        if (!priv) throw new Error('Ключ рэтчета уже удалён (нет ключа для этого получателя на этом устройстве)');
         chain = await hkdf(await deriveSecret(priv, entry.ratchet), chainInfo(chatId, entry.ratchet, entry.tag), 32);
         counter = 0;
         skipped = {};
@@ -456,6 +481,7 @@
       let plain;
       try {
         plain = DEC.decode(await aesDecrypt(aesKey, entry.iv, entry.ciphertext));
+        rememberDecrypted(username, fields.ciphertext, plain, myUserId);
       } catch (e) {
         throw new Error('Сообщение не расшифровывается: ключ или данные повреждены (AES-GCM auth tag)');
       }
@@ -499,6 +525,9 @@
     const sentCache = readJson(SENT_CACHE_STORE, {});
     delete sentCache[username];
     writeJson(SENT_CACHE_STORE, sentCache);
+    const decCache = readJson(DECRYPTED_CACHE_STORE, {});
+    delete decCache[username];
+    writeJson(DECRYPTED_CACHE_STORE, decCache);
     return { username: username, pub: fresh.pub, privJwk: fresh.privJwk, created_at: fresh.created_at };
   }
 
@@ -512,6 +541,9 @@
     const sentCache = readJson(SENT_CACHE_STORE, {});
     delete sentCache[username];
     writeJson(SENT_CACHE_STORE, sentCache);
+    const decCache = readJson(DECRYPTED_CACHE_STORE, {});
+    delete decCache[username];
+    writeJson(DECRYPTED_CACHE_STORE, decCache);
   }
 
   /** Локальный кэш собственных исходящих сообщений (plaintext только на устройстве). */
@@ -531,6 +563,43 @@
     const bucket = (readJson(SENT_CACHE_STORE, {})[username] || {})[String(chatId)] || [];
     const hit = bucket.find(e => Number(e.id) === Number(messageId));
     return hit ? hit.text : null;
+  }
+
+  /** Локальный кэш расшифрованных входящих сообщений (PFS-ключ уже сдвинут, повторное чтение из кэша). */
+  function cacheKeyForCipher(ciphertext, myUserId = '') {
+    if (!ciphertext) return '';
+    const uPrefix = myUserId ? (String(myUserId) + ':') : '';
+    return uPrefix + (ciphertext.length > 80
+      ? (ciphertext.substring(0, 40) + '_' + ciphertext.slice(-40) + '_' + ciphertext.length)
+      : ciphertext);
+  }
+
+  function rememberDecrypted(username, ciphertext, plaintext, myUserId = '') {
+    if (!username || !ciphertext || plaintext === undefined || plaintext === null) return;
+    try {
+      const cache = readJson(DECRYPTED_CACHE_STORE, {});
+      const bucket = cache[username] || {};
+      const key = cacheKeyForCipher(ciphertext, myUserId);
+      bucket[key] = String(plaintext);
+      const keys = Object.keys(bucket);
+      if (keys.length > MAX_DECRYPTED_CACHE) {
+        delete bucket[keys[0]];
+      }
+      cache[username] = bucket;
+      writeJson(DECRYPTED_CACHE_STORE, cache);
+    } catch (e) { }
+  }
+
+  function cachedDecrypted(username, ciphertext, myUserId = '') {
+    if (!username || !ciphertext) return null;
+    try {
+      const cache = readJson(DECRYPTED_CACHE_STORE, {});
+      const bucket = cache[username] || {};
+      const key = cacheKeyForCipher(ciphertext, myUserId);
+      return bucket[key] !== undefined ? bucket[key] : null;
+    } catch (e) {
+      return null;
+    }
   }
 
   /** Экспорт ключей: файл с паролем (PBKDF2-SHA256 210k итераций + AES-GCM) или без пароля. */
@@ -622,11 +691,37 @@
     };
   }
 
+  function isEncrypted(str) {
+    if (!str || typeof str !== 'string' || str.length < 80) return false;
+    try {
+      const raw = unb64(str.trim());
+      const unpacked = unpackEnvelope(raw);
+      return !!(unpacked && unpacked.entries && unpacked.entries.length > 0);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function decryptSafe(chatId, senderId, content, username, myUserId) {
+    if (!isEncrypted(content)) {
+      return { encrypted: false, plaintext: content, success: true };
+    }
+    try {
+      const plain = await decrypt(chatId, senderId, { ciphertext: content.trim() }, username, myUserId);
+      return { encrypted: true, plaintext: plain, success: true };
+    } catch (err) {
+      return { encrypted: true, plaintext: null, success: false, error: err.message };
+    }
+  }
+
   const api = {
     available: available,
+    diagnose: diagnose,
     fingerprint: fingerprint,
+    isEncrypted: isEncrypted,
     encrypt: encrypt,
     decrypt: decrypt,
+    decryptSafe: decryptSafe,
     ensureIdentity: ensureIdentity,
     identityInfo: identityInfo,
     regenerateIdentity: regenerateIdentity,
@@ -636,7 +731,9 @@
     outgoingPublicKey: outgoingPublicKey,
     sessionSummary: sessionSummary,
     rememberSent: rememberSent,
-    cachedSent: cachedSent
+    cachedSent: cachedSent,
+    rememberDecrypted: rememberDecrypted,
+    cachedDecrypted: cachedDecrypted
   };
 
   globalScope.E2EE = api;

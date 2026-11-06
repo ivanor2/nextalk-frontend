@@ -7,15 +7,19 @@ let wsReconnectTimer = null;
 let wsReconnectDelay = 1500;
 const safeStorage = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
-    remove(k) { try { localStorage.removeItem(k); } catch (e) {} }
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { } },
+    remove(k) { try { localStorage.removeItem(k); } catch (e) { } }
 };
 
-let cachedWs = safeStorage.get('nt-node');
 let defaultNode = (window.APP_CONFIG && window.APP_CONFIG.defaultNode) ? window.APP_CONFIG.defaultNode : 'ws://127.0.0.1:3001';
-let wsCurrentUrl = cachedWs || defaultNode;
+let storedNode = safeStorage.get('nt-node');
+if (storedNode && (storedNode.includes('loca.lt') || (window.location.protocol === 'https:' && storedNode.startsWith('ws://')))) {
+    safeStorage.remove('nt-node');
+    storedNode = null;
+}
+let wsCurrentUrl = storedNode || defaultNode;
 if (window.location.protocol === 'https:' && wsCurrentUrl.startsWith('ws://')) {
-    wsCurrentUrl = defaultNode.startsWith('wss://') ? defaultNode : wsCurrentUrl.replace(/^ws:\/\//, 'wss://');
+    wsCurrentUrl = wsCurrentUrl.replace(/^ws:\/\//, 'wss://').replace('127.0.0.1', 'localhost');
 }
 
 let jwtToken = null;
@@ -48,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const resp = await fetch(`api/search_users.php?q=${encodeURIComponent(q)}`);
                     const users = await resp.json();
                     renderSearchResults(users);
-                } catch (e) {}
+                } catch (e) { }
             }, 250);
         });
 
@@ -210,7 +214,7 @@ async function getJWT() {
             jwtExpires = Math.floor(Date.now() / 1000) + (data.expires_in || 86400 * 7);
             return jwtToken;
         }
-    } catch (e) {}
+    } catch (e) { }
     return null;
 }
 
@@ -226,7 +230,7 @@ async function wsConnect(url) {
             ws.onclose = null;
             ws.onerror = null;
             ws.close();
-        } catch (e) {}
+        } catch (e) { }
         ws = null;
     }
 
@@ -302,6 +306,9 @@ function formatTime(ts) {
 
 function formatMessagePreview(content) {
     if (!content) return 'Нет сообщений';
+    if (window.E2EE && E2EE.isEncrypted(content)) {
+        return '🔐 Зашифрованное сообщение';
+    }
     const trimmed = String(content).trim();
     if (trimmed.startsWith('[attachment:')) {
         const m = trimmed.match(/^\[attachment:(\{[\s\S]*\})\]$/);
@@ -310,7 +317,7 @@ function formatMessagePreview(content) {
                 const att = JSON.parse(m[1]);
                 const icon = att.is_image ? '🖼️' : '📎';
                 return `${icon} ${att.filename || 'Вложение'}`;
-            } catch (e) {}
+            } catch (e) { }
         }
         return '📎 Вложение';
     }
@@ -332,7 +339,7 @@ function playNotificationSound() {
         gain.connect(ctx.destination);
         osc.start();
         osc.stop(ctx.currentTime + 0.25);
-    } catch (e) {}
+    } catch (e) { }
 }
 
 function triggerNotification(sender, text) {
@@ -352,7 +359,7 @@ function triggerNotification(sender, text) {
             window.focus();
             notif.close();
         };
-    } catch (e) {}
+    } catch (e) { }
 }
 
 function updateGlobalUnread(total) {

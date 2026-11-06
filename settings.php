@@ -167,7 +167,14 @@ require __DIR__ . '/templates/partials/head.php';
 
 <?php require __DIR__ . '/templates/partials/toast.php'; ?>
 
-<script src="assets/js/app.js"></script>
-<script src="assets/js/settings.js"></script>
+<script>
+window.SETTINGS_CONFIG = {
+    userId: <?= (int)$userId ?>,
+    username: <?= json_encode($username) ?>
+};
+</script>
+<script src="assets/js/crypto.js?v=<?= filemtime(__DIR__ . '/assets/js/crypto.js') ?>"></script>
+<script src="assets/js/app.js?v=<?= filemtime(__DIR__ . '/assets/js/app.js') ?>"></script>
+<script src="assets/js/settings.js?v=<?= filemtime(__DIR__ . '/assets/js/settings.js') ?>"></script>
 </body>
 </html>

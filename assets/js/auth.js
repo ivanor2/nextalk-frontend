@@ -121,6 +121,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (hasError) {
                 e.preventDefault();
+            } else if (window.E2EE && E2EE.available()) {
+                const pubInput = document.getElementById('registerPublicKey');
+                if (pubInput && !pubInput.value) {
+                    e.preventDefault();
+                    E2EE.ensureIdentity(username).then(id => {
+                        if (id && id.pub) pubInput.value = id.pub;
+                        regForm.submit();
+                    }).catch(() => {
+                        regForm.submit();
+                    });
+                }
             }
         });
     }

@@ -156,3 +156,34 @@ document.addEventListener('keydown', e => {
             .catch(() => {});
     });
 })();
+
+// ── Global E2EE Key Synchronization ─────────────────────────
+(function initGlobalE2EESync() {
+    document.addEventListener('DOMContentLoaded', async () => {
+        if (!window.E2EE || !E2EE.available()) return;
+        const cfg = window.APP_CONFIG || window.CHAT_CONFIG || window.SETTINGS_CONFIG;
+        const username = cfg ? cfg.username : null;
+        if (!username) return;
+
+        try {
+            const id = await E2EE.ensureIdentity(username);
+            if (id && id.pub) {
+                const cacheKey = 'nt_pub_synced_' + username;
+                if (sessionStorage.getItem(cacheKey) !== id.pub) {
+                    fetch('api/sync_key.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ public_key: id.pub })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d && d.ok) sessionStorage.setItem(cacheKey, id.pub);
+                    })
+                    .catch(() => {});
+                }
+            }
+        } catch (e) {
+            console.warn('E2EE global key sync error:', e);
+        }
+    });
+})();

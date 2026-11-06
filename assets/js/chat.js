@@ -6,14 +6,19 @@ let lastMessageId = (window.CHAT_CONFIG && window.CHAT_CONFIG.lastMessageId) || 
 let ws = null;
 const safeStorage = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
-    remove(k) { try { localStorage.removeItem(k); } catch (e) {} }
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { } },
+    remove(k) { try { localStorage.removeItem(k); } catch (e) { } }
 };
 
 let defaultNode = (window.CHAT_CONFIG && window.CHAT_CONFIG.defaultNode) || 'ws://127.0.0.1:3001';
-let wsCurrentUrl = safeStorage.get('nt-node') || defaultNode;
+let storedNode = safeStorage.get('nt-node');
+if (storedNode && (storedNode.includes('loca.lt') || (window.location.protocol === 'https:' && storedNode.startsWith('ws://')))) {
+    safeStorage.remove('nt-node');
+    storedNode = null;
+}
+let wsCurrentUrl = storedNode || defaultNode;
 if (window.location.protocol === 'https:' && wsCurrentUrl.startsWith('ws://')) {
-    wsCurrentUrl = defaultNode.startsWith('wss://') ? defaultNode : wsCurrentUrl.replace(/^ws:\/\//, 'wss://');
+    wsCurrentUrl = wsCurrentUrl.replace(/^ws:\/\//, 'wss://').replace('127.0.0.1', 'localhost');
 }
 let wsReconnectTimer = null;
 let wsReconnectDelay = 1500;
@@ -42,7 +47,7 @@ function playNotificationSound() {
         gain.connect(ctx.destination);
         osc.start();
         osc.stop(ctx.currentTime + 0.25);
-    } catch (e) {}
+    } catch (e) { }
 }
 
 // ── System Notifications ────────────────────────────────────
@@ -63,14 +68,14 @@ function triggerNotification(sender, text) {
             window.focus();
             notif.close();
         };
-    } catch (e) {}
+    } catch (e) { }
 }
 
 window.addEventListener('focus', () => {
     unreadCount = 0;
     document.title = originalTitle;
     const cid = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
-    if (cid) fetch(`api/mark_read.php?chat_id=${cid}`, { method: 'POST' }).catch(() => {});
+    if (cid) fetch(`api/mark_read.php?chat_id=${cid}`, { method: 'POST' }).catch(() => { });
 });
 
 function incrementUnread() {
@@ -117,12 +122,15 @@ async function getJWT() {
             jwtExpires = Math.floor(Date.now() / 1000) + (data.expires_in || 86400 * 7);
             return jwtToken;
         }
-    } catch (e) {}
+    } catch (e) { }
     return null;
 }
 
 function formatMessagePreview(content) {
     if (!content) return '';
+    if (window.E2EE && E2EE.isEncrypted(content)) {
+        return '🔐 Зашифрованное сообщение';
+    }
     const trimmed = String(content).trim();
     if (trimmed.startsWith('[attachment:')) {
         const m = trimmed.match(/^\[attachment:(\{[\s\S]*\})\]$/);
@@ -131,18 +139,52 @@ function formatMessagePreview(content) {
                 const att = JSON.parse(m[1]);
                 const icon = att.is_image ? '🖼️' : '📎';
                 return `${icon} ${att.filename || 'Вложение'}`;
-            } catch (e) {}
+            } catch (e) { }
         }
         return '📎 Вложение';
     }
     return trimmed;
 }
 
-// ── Render Message (Attachments + Bubbles) ──────────────────
+// ── Render Message Bubble Helper ─────────────────────────────
+function renderBubbleContent(rawContent) {
+    const trimmed = String(rawContent || '').trim();
+    const attMatch = trimmed.match(/^\[attachment:(\{[\s\S]*\})\]$/);
+    if (attMatch) {
+        try {
+            const att = JSON.parse(attMatch[1]);
+            if (att.is_image) {
+                return `
+                    <a href="${escHtml(att.url)}" target="_blank" rel="noopener">
+                        <img src="${escHtml(att.url)}" class="img-attachment" alt="${escHtml(att.filename)}">
+                    </a>
+                    <div class="file-desc-sub">${escHtml(att.filename)} (${formatBytes(att.size)})</div>
+                `;
+            } else {
+                return `
+                    <a href="${escHtml(att.url)}" target="_blank" download="${escHtml(att.filename)}" class="file-attachment-card">
+                        <div class="file-icon">📄</div>
+                        <div class="file-details">
+                            <div class="file-name">${escHtml(att.filename)}</div>
+                            <div class="file-size">${formatBytes(att.size)} · Нажмите чтобы скачать</div>
+                        </div>
+                    </a>
+                `;
+            }
+        } catch (e) {
+            return escHtml(rawContent).replace(/\n/g, '<br>');
+        }
+    }
+    return escHtml(rawContent).replace(/\n/g, '<br>');
+}
+
+// ── Render Message (Attachments + Bubbles + E2EE) ───────────
 function renderMessage(msg) {
     const curUserId = window.CHAT_CONFIG ? window.CHAT_CONFIG.userId : 0;
     const curUsername = window.CHAT_CONFIG ? window.CHAT_CONFIG.username : '';
     const isGroup = window.CHAT_CONFIG ? window.CHAT_CONFIG.isGroup : false;
+    const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
+    const compId = window.CHAT_CONFIG ? window.CHAT_CONFIG.companionId : 0;
 
     const isMe = (msg.sender === curUsername || msg.sender_id == curUserId);
     const wrap = document.getElementById('messagesWrap');
@@ -162,6 +204,7 @@ function renderMessage(msg) {
     div.dataset.id = msg.id || ('ws-' + Date.now());
     div.dataset.content = rawContent;
     div.dataset.sender = msg.sender || msg.username || '';
+    div.dataset.senderId = msg.sender_id || msg.user_id || (isMe ? curUserId : compId);
 
     const timeStr = msg.timestamp
         ? formatTime(msg.timestamp)
@@ -171,35 +214,21 @@ function renderMessage(msg) {
         ? `<div class="msg-author">${escHtml(msg.display || msg.sender || msg.username || 'Собеседник')}</div>`
         : '';
 
+    const isEnc = window.E2EE && E2EE.isEncrypted(rawContent);
     let bubbleBody = '';
-    const trimmed = rawContent.trim();
-    const attMatch = trimmed.match(/^\[attachment:(\{[\s\S]*\})\]$/);
-    if (attMatch) {
-        try {
-            const att = JSON.parse(attMatch[1]);
-            if (att.is_image) {
-                bubbleBody = `
-                    <a href="${escHtml(att.url)}" target="_blank" rel="noopener">
-                        <img src="${escHtml(att.url)}" class="img-attachment" alt="${escHtml(att.filename)}">
-                    </a>
-                    <div class="file-desc-sub">${escHtml(att.filename)} (${formatBytes(att.size)})</div>
-                `;
-            } else {
-                bubbleBody = `
-                    <a href="${escHtml(att.url)}" target="_blank" download="${escHtml(att.filename)}" class="file-attachment-card">
-                        <div class="file-icon">📄</div>
-                        <div class="file-details">
-                            <div class="file-name">${escHtml(att.filename)}</div>
-                            <div class="file-size">${formatBytes(att.size)} · Нажмите чтобы скачать</div>
-                        </div>
-                    </a>
-                `;
-            }
-        } catch (e) {
-            bubbleBody = escHtml(rawContent).replace(/\n/g, '<br>');
+    let displayText = msg.plaintext || null;
+
+    if (isEnc) {
+        if (!displayText && isMe && msg.id) {
+            displayText = E2EE.cachedSent(chatId, msg.id, curUsername);
+        }
+        if (displayText) {
+            bubbleBody = renderBubbleContent(displayText) + '<span class="msg-e2e-lock" title="🔐 Сквозное шифрование E2EE (расшифровано)">🔒</span>';
+        } else {
+            bubbleBody = '<div class="e2e-encrypted-placeholder"><span class="e2e-lock-icon">🔐</span> <em>Расшифровка...</em></div>';
         }
     } else {
-        bubbleBody = escHtml(rawContent).replace(/\n/g, '<br>');
+        bubbleBody = renderBubbleContent(rawContent);
     }
 
     const statusHtml = isMe ? `<span class="msg-status">✓✓</span>` : '';
@@ -215,6 +244,25 @@ function renderMessage(msg) {
 
     const typing = document.getElementById('typingIndicator');
     wrap.insertBefore(div, typing);
+
+    // Asynchronous decryption if needed
+    if (isEnc && !displayText && window.E2EE) {
+        const senderId = Number(div.dataset.senderId || (isMe ? curUserId : compId));
+        (async () => {
+            try {
+                const plain = await E2EE.decrypt(chatId, senderId, { ciphertext: rawContent }, curUsername, curUserId);
+                const bubble = div.querySelector('.msg-bubble');
+                if (bubble) {
+                    bubble.innerHTML = renderBubbleContent(plain) + '<span class="msg-e2e-lock" title="🔐 Сквозное шифрование E2EE (расшифровано)">🔒</span>';
+                }
+            } catch (err) {
+                const bubble = div.querySelector('.msg-bubble');
+                if (bubble) {
+                    bubble.innerHTML = '<div class="e2e-encrypted-placeholder"><span class="e2e-lock-icon">🔐</span> <em>Зашифрованное сообщение</em><div class="e2e-sub">Ключ недоступен на этом устройстве</div></div>';
+                }
+            }
+        })();
+    }
 
     const atBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 140;
     if (atBottom || isMe) scrollToBottom(true);
@@ -246,7 +294,7 @@ async function wsConnect(url) {
             ws.onclose = null;
             ws.onerror = null;
             ws.close();
-        } catch (e) {}
+        } catch (e) { }
         ws = null;
     }
 
@@ -285,12 +333,14 @@ async function wsConnect(url) {
     socket.addEventListener('close', () => {
         if (ws !== socket) return;
         setNodeStatus('error', 'Не подключён');
+        startPolling(1500);
         scheduleReconnect();
     });
 
     socket.addEventListener('error', () => {
         if (ws !== socket) return;
         setNodeStatus('error', 'Ошибка WebSocket');
+        startPolling(1500);
     });
 }
 
@@ -334,7 +384,7 @@ async function updateSidebarBadge() {
                 }
             }
         }
-    } catch (e) {}
+    } catch (e) { }
 }
 
 // ── Handle Incoming Messages ────────────────────────────────
@@ -376,7 +426,7 @@ function handleWsMsg(msg) {
                     triggerNotification(msg.sender || companionName, formatMessagePreview(msg.content || ''));
                     incrementUnread();
                     if (!document.hidden) {
-                        fetch(`api/mark_read.php?chat_id=${chatId}`, { method: 'POST' }).catch(() => {});
+                        fetch(`api/mark_read.php?chat_id=${chatId}`, { method: 'POST' }).catch(() => { });
                     }
                 } else if (existingByContent && !existingById && msg.id) {
                     existingByContent.dataset.id = msg.id;
@@ -442,279 +492,330 @@ function showTypingIndicator(show) {
 }
 
 // ── Polling Fallback ────────────────────────────────────────
-function startPolling() {
-    stopPolling();
-    pollTimer = setInterval(fetchNewMessages, 3000);
-}
-
-function stopPolling() {
-    if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-    }
-}
-
-async function fetchNewMessages() {
-    const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
-    const curUserId = window.CHAT_CONFIG ? window.CHAT_CONFIG.userId : 0;
-    try {
-        const resp = await fetch(`api/get_messages.php?chat_id=${chatId}&last_id=${lastMessageId}&t=${Date.now()}`);
-        const data = await resp.json();
-        if (!data.ok || !data.messages?.length) return;
-        data.messages.forEach(msg => {
-            const numId = Number(msg.id);
-            if (!isNaN(numId) && numId > 0) {
-                lastMessageId = Math.max(lastMessageId, numId);
-            }
-            if (msg.sender_id == curUserId) {
-                const existingMe = document.querySelector(`[data-id="${msg.id}"]`);
-                if (!existingMe) {
-                    const temp = Array.from(document.querySelectorAll('.message.out[data-id^="ws-"]'))
-                        .find(m => m.dataset.content === msg.content);
-                    if (temp) temp.dataset.id = msg.id;
-                }
-                return;
-            }
-            if (document.querySelector(`[data-id="${msg.id}"]`)) {
-                return;
-            }
-            // Check if already displayed via temporary ws- ID or matching content
-            const existingTemp = Array.from(document.querySelectorAll('.message.in'))
-                .find(m => m.dataset.content === msg.content && (m.dataset.sender === msg.username || !m.dataset.sender));
-            if (existingTemp) {
-                existingTemp.dataset.id = msg.id;
-                return;
-            }
-
-            renderMessage({
-                id: msg.id,
-                sender: msg.username,
-                sender_id: msg.sender_id,
-                content: msg.content,
-                timestamp: msg.created_at
-            });
-            playNotificationSound();
-            incrementUnread();
-        });
-    } catch (e) {}
-}
-
-// ── Send Message Logic ──────────────────────────────────────
-async function sendTextMessage(customText = null) {
-    const msgInput = document.getElementById('msgInput');
-    const sendBtn = document.getElementById('sendBtn');
-    const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
-    const curUsername = window.CHAT_CONFIG ? window.CHAT_CONFIG.username : '';
-    const curUserId = window.CHAT_CONFIG ? window.CHAT_CONFIG.userId : 0;
-    const companionName = window.CHAT_CONFIG ? window.CHAT_CONFIG.companionName : '';
-
-    const content = (customText !== null ? customText : (msgInput ? msgInput.value : '')).trim();
-    if (!content) return;
-
-    if (customText === null && msgInput) {
-        msgInput.value = '';
-        msgInput.style.height = '';
-    }
-    if (sendBtn) sendBtn.disabled = true;
-
-    // 1. HTTP persistence first (gets the real database message ID)
-    try {
-        const fd = new FormData();
-        fd.append('message', content);
-        const resp = await fetch(`chat.php?id=${chatId}`, {
-            method: 'POST',
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            body: fd,
-        });
-        const data = await resp.json();
-        if (data.ok) {
-            const dbId = data.id;
-            const timestamp = data.timestamp || new Date().toISOString();
-            renderMessage({
-                id: dbId,
-                sender: curUsername,
-                sender_id: curUserId,
-                content,
-                timestamp,
-            });
-            if (dbId) {
-                lastMessageId = Math.max(lastMessageId, Number(dbId));
-            }
-
-            // 2. Broadcast via WebSocket with real DB message ID
-            wsSend({
-                type: 'send',
-                chat_id: chatId,
-                content,
-                db_message_id: dbId,
-                recipient: companionName
-            });
-        } else {
-            showToast(data.error || 'Ошибка отправки', 'error');
-        }
-    } catch (e) {
-        showToast('Ошибка сохранения сообщения', 'error');
+    function startPolling(interval = null) {
+        stopPolling();
+        const delay = interval || (ws && ws.readyState === WebSocket.OPEN ? 4000 : 1500);
+        pollTimer = setInterval(fetchNewMessages, delay);
     }
 
-    if (sendBtn) sendBtn.disabled = false;
-    if (msgInput) msgInput.focus();
-
-    if (isTyping) {
-        isTyping = false;
-        wsSend({ type: 'typing', chat_id: chatId, is_typing: false });
+    function stopPolling() {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
     }
-}
 
-// ── DOM Event Listeners ─────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-    const msgInput = document.getElementById('msgInput');
-    const sendBtn = document.getElementById('sendBtn');
-    const attachBtn = document.getElementById('attachBtn');
-    const attachmentInput = document.getElementById('attachmentInput');
-    const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
-
-    sendBtn?.addEventListener('click', () => sendTextMessage());
-
-    msgInput?.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendTextMessage();
-        }
-    });
-
-    msgInput?.addEventListener('input', () => {
-        msgInput.style.height = 'auto';
-        msgInput.style.height = Math.min(msgInput.scrollHeight, 160) + 'px';
-        if (!isTyping) {
-            isTyping = true;
-            wsSend({ type: 'typing', chat_id: chatId, is_typing: true });
-        }
-        clearTimeout(typingTimer);
-        typingTimer = setTimeout(() => {
-            isTyping = false;
-            wsSend({ type: 'typing', chat_id: chatId, is_typing: false });
-        }, 2500);
-    });
-
-    // File attachments
-    attachBtn?.addEventListener('click', () => attachmentInput?.click());
-    attachmentInput?.addEventListener('change', async () => {
-        const file = attachmentInput.files[0];
-        if (!file) return;
-
-        if (file.size > 10 * 1024 * 1024) {
-            showToast('Размер файла превышает 10 МБ', 'error');
-            attachmentInput.value = '';
-            return;
-        }
-
-        showToast(`Загрузка файла ${file.name}...`, 'info');
-        const fd = new FormData();
-        fd.append('file', file);
-
+    async function fetchNewMessages() {
+        const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
+        const curUserId = window.CHAT_CONFIG ? window.CHAT_CONFIG.userId : 0;
         try {
-            const resp = await fetch('api/upload_attachment.php', { method: 'POST', body: fd });
+            const resp = await fetch(`api/get_messages.php?chat_id=${chatId}&last_id=${lastMessageId}&t=${Date.now()}`);
             const data = await resp.json();
+            if (!data.ok || !data.messages?.length) return;
+            data.messages.forEach(msg => {
+                const numId = Number(msg.id);
+                if (!isNaN(numId) && numId > 0) {
+                    lastMessageId = Math.max(lastMessageId, numId);
+                }
+                if (msg.sender_id == curUserId) {
+                    const existingMe = document.querySelector(`[data-id="${msg.id}"]`);
+                    if (!existingMe) {
+                        const temp = Array.from(document.querySelectorAll('.message.out[data-id^="ws-"]'))
+                            .find(m => m.dataset.content === msg.content);
+                        if (temp) temp.dataset.id = msg.id;
+                    }
+                    return;
+                }
+                if (document.querySelector(`[data-id="${msg.id}"]`)) {
+                    return;
+                }
+                // Check if already displayed via temporary ws- ID or matching content
+                const existingTemp = Array.from(document.querySelectorAll('.message.in'))
+                    .find(m => m.dataset.content === msg.content && (m.dataset.sender === msg.username || !m.dataset.sender));
+                if (existingTemp) {
+                    existingTemp.dataset.id = msg.id;
+                    return;
+                }
 
-            if (data.ok && data.attachment) {
-                const payload = `[attachment:${JSON.stringify(data.attachment)}]`;
-                await sendTextMessage(payload);
-                showToast('Файл успешно прикреплён!', 'success');
+                renderMessage({
+                    id: msg.id,
+                    sender: msg.username,
+                    sender_id: msg.sender_id,
+                    user_id: msg.sender_id,
+                    content: msg.content,
+                    timestamp: msg.created_at
+                });
+                playNotificationSound();
+                incrementUnread();
+            });
+            updateSidebarBadge();
+        } catch (e) { }
+    }
+
+    // ── Send Message Logic (with E2EE) ──────────────────────────
+    async function sendTextMessage(customText = null) {
+        const msgInput = document.getElementById('msgInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
+        const curUsername = window.CHAT_CONFIG ? window.CHAT_CONFIG.username : '';
+        const curUserId = window.CHAT_CONFIG ? window.CHAT_CONFIG.userId : 0;
+        const companionName = window.CHAT_CONFIG ? window.CHAT_CONFIG.companionName : '';
+        const isGroup = window.CHAT_CONFIG ? window.CHAT_CONFIG.isGroup : false;
+
+        const content = (customText !== null ? customText : (msgInput ? msgInput.value : '')).trim();
+        if (!content) return;
+
+        if (customText === null && msgInput) {
+            msgInput.value = '';
+            msgInput.style.height = '';
+        }
+        if (sendBtn) sendBtn.disabled = true;
+
+        // Encrypt message if E2EE is available and recipients have keys
+        let outgoingContent = content;
+        let isEncryptedMsg = false;
+
+        if (window.E2EE && E2EE.available()) {
+            try {
+                await E2EE.ensureIdentity(curUsername);
+                let recipients = [];
+                if (isGroup) {
+                    const members = (window.CHAT_CONFIG && window.CHAT_CONFIG.members) || [];
+                    recipients = members
+                        .filter(m => Number(m.user_id) !== Number(curUserId) && m.public_key)
+                        .map(m => ({ id: Number(m.user_id), pub: m.public_key }));
+                } else {
+                    let compPub = window.CHAT_CONFIG ? window.CHAT_CONFIG.companionPublicKey : null;
+                    const compId = window.CHAT_CONFIG ? window.CHAT_CONFIG.companionId : null;
+                    if (!compPub && compId) {
+                        try {
+                            const r = await fetch(`api/sync_key.php?user_id=${compId}`);
+                            const d = await r.json();
+                            if (d.ok && d.public_key) {
+                                compPub = d.public_key;
+                                window.CHAT_CONFIG.companionPublicKey = compPub;
+                            }
+                        } catch (e) { }
+                    }
+                    if (compPub && compId) {
+                        recipients = [{ id: Number(compId), pub: compPub }];
+                    }
+                }
+
+                if (recipients.length > 0) {
+                    const enc = await E2EE.encrypt(chatId, isGroup ? 'group' : 'private', recipients, content, curUsername);
+                    outgoingContent = enc.ciphertext;
+                    isEncryptedMsg = true;
+                }
+            } catch (e) {
+                console.warn('E2EE encryption error, falling back to plaintext:', e);
+            }
+        }
+
+        // 1. HTTP persistence first (gets the real database message ID)
+        try {
+            const fd = new FormData();
+            fd.append('message', outgoingContent);
+            const resp = await fetch(`chat.php?id=${chatId}`, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: fd,
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                const dbId = data.id;
+                const timestamp = data.timestamp || new Date().toISOString();
+
+                if (isEncryptedMsg && dbId) {
+                    E2EE.rememberSent(chatId, dbId, content, curUsername);
+                }
+
+                renderMessage({
+                    id: dbId,
+                    sender: curUsername,
+                    sender_id: curUserId,
+                    content: outgoingContent,
+                    plaintext: content,
+                    timestamp,
+                });
+                if (dbId) {
+                    lastMessageId = Math.max(lastMessageId, Number(dbId));
+                }
+
+                // 2. Broadcast via WebSocket with real DB message ID
+                wsSend({
+                    type: 'send',
+                    chat_id: chatId,
+                    content: outgoingContent,
+                    db_message_id: dbId,
+                    recipient: companionName
+                });
             } else {
-                showToast(data.error || 'Ошибка загрузки файла', 'error');
+                showToast(data.error || 'Ошибка отправки', 'error');
             }
         } catch (e) {
-            showToast('Не удалось загрузить файл', 'error');
+            showToast('Ошибка сохранения сообщения', 'error');
         }
 
-        attachmentInput.value = '';
-    });
+        if (sendBtn) sendBtn.disabled = false;
+        if (msgInput) msgInput.focus();
 
-    // Info panel toggle
-    const chatInfoPanel = document.getElementById('chatInfoPanel');
-    const toggleInfoBtn = document.getElementById('toggleInfoBtn');
-    const closeInfoBtn = document.getElementById('closeInfoBtn');
-    const headerTitle = document.getElementById('chatHeaderTitle');
-    const compAvatar = document.getElementById('companionAvatar');
-
-    function toggleInfo() {
-        if (chatInfoPanel) chatInfoPanel.classList.toggle('hidden');
-    }
-
-    toggleInfoBtn?.addEventListener('click', toggleInfo);
-    closeInfoBtn?.addEventListener('click', toggleInfo);
-    headerTitle?.addEventListener('click', toggleInfo);
-    compAvatar?.addEventListener('click', toggleInfo);
-
-    document.getElementById('clearViewBtn')?.addEventListener('click', () => {
-        if (confirm('Очистить сообщения на экране?')) {
-            const wrap = document.getElementById('messagesWrap');
-            if (wrap) wrap.innerHTML = '<div class="empty-chat" id="emptyChat">💬 Экран очищен</div>';
-        }
-    });
-
-    document.getElementById('refreshBtn')?.addEventListener('click', fetchNewMessages);
-
-    // ── Command Palette (Ctrl+K) ──────────────────────────────
-    const cmdPaletteOverlay = document.getElementById('cmdPaletteOverlay');
-    const cmdPaletteInput = document.getElementById('cmdPaletteInput');
-
-    function openCmdPalette() {
-        if (cmdPaletteOverlay && cmdPaletteInput) {
-            cmdPaletteOverlay.classList.add('open');
-            cmdPaletteInput.value = '';
-            cmdPaletteInput.focus();
+        if (isTyping) {
+            isTyping = false;
+            wsSend({ type: 'typing', chat_id: chatId, is_typing: false });
         }
     }
 
-    cmdPaletteOverlay?.addEventListener('click', e => {
-        if (e.target === cmdPaletteOverlay) cmdPaletteOverlay.classList.remove('open');
-    });
+    // ── DOM Event Listeners ─────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        const msgInput = document.getElementById('msgInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const attachBtn = document.getElementById('attachBtn');
+        const attachmentInput = document.getElementById('attachmentInput');
+        const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
 
-    // ── Hotkeys ───────────────────────────────────────────────
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') {
-            if (cmdPaletteOverlay && cmdPaletteOverlay.classList.contains('open')) {
-                cmdPaletteOverlay.classList.remove('open');
+        sendBtn?.addEventListener('click', () => sendTextMessage());
+
+        msgInput?.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendTextMessage();
+            }
+        });
+
+        msgInput?.addEventListener('input', () => {
+            msgInput.style.height = 'auto';
+            msgInput.style.height = Math.min(msgInput.scrollHeight, 160) + 'px';
+            if (!isTyping) {
+                isTyping = true;
+                wsSend({ type: 'typing', chat_id: chatId, is_typing: true });
+            }
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(() => {
+                isTyping = false;
+                wsSend({ type: 'typing', chat_id: chatId, is_typing: false });
+            }, 2500);
+        });
+
+        // File attachments
+        attachBtn?.addEventListener('click', () => attachmentInput?.click());
+        attachmentInput?.addEventListener('change', async () => {
+            const file = attachmentInput.files[0];
+            if (!file) return;
+
+            if (file.size > 10 * 1024 * 1024) {
+                showToast('Размер файла превышает 10 МБ', 'error');
+                attachmentInput.value = '';
                 return;
             }
-            const currentNodesModal = document.getElementById('nodesModal');
-            if (currentNodesModal && currentNodesModal.classList.contains('open')) {
-                currentNodesModal.classList.remove('open');
-                return;
+
+            showToast(`Загрузка файла ${file.name}...`, 'info');
+            const fd = new FormData();
+            fd.append('file', file);
+
+            try {
+                const resp = await fetch('api/upload_attachment.php', { method: 'POST', body: fd });
+                const data = await resp.json();
+
+                if (data.ok && data.attachment) {
+                    const payload = `[attachment:${JSON.stringify(data.attachment)}]`;
+                    await sendTextMessage(payload);
+                    showToast('Файл успешно прикреплён!', 'success');
+                } else {
+                    showToast(data.error || 'Ошибка загрузки файла', 'error');
+                }
+            } catch (e) {
+                showToast('Не удалось загрузить файл', 'error');
             }
-            const currentAddMemberModal = document.getElementById('addMemberModal');
-            if (currentAddMemberModal && currentAddMemberModal.classList.contains('open')) {
-                currentAddMemberModal.classList.remove('open');
-                return;
-            }
-            if (chatInfoPanel && !chatInfoPanel.classList.contains('hidden')) {
-                chatInfoPanel.classList.add('hidden');
-                return;
-            }
-            window.location.href = 'index.php';
+
+            attachmentInput.value = '';
+        });
+
+        // Info panel toggle
+        const chatInfoPanel = document.getElementById('chatInfoPanel');
+        const toggleInfoBtn = document.getElementById('toggleInfoBtn');
+        const closeInfoBtn = document.getElementById('closeInfoBtn');
+        const headerTitle = document.getElementById('chatHeaderTitle');
+        const compAvatar = document.getElementById('companionAvatar');
+
+        function toggleInfo() {
+            if (chatInfoPanel) chatInfoPanel.classList.toggle('hidden');
         }
 
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-            e.preventDefault();
-            openCmdPalette();
-        }
-    });
+        toggleInfoBtn?.addEventListener('click', toggleInfo);
+        closeInfoBtn?.addEventListener('click', toggleInfo);
+        headerTitle?.addEventListener('click', toggleInfo);
+        compAvatar?.addEventListener('click', toggleInfo);
 
-    // ── Node Modal ────────────────────────────────────────────
-    const nodesModal = document.getElementById('nodesModal');
-    async function loadNodes() {
-        const list = document.getElementById('nodeListModal');
-        if (!list) return;
-        list.innerHTML = '<div class="text-center text-muted p-16 fs-13">⏳ Загрузка узлов...</div>';
-        try {
-            const token = await getJWT();
-            const resp = await fetch('http://localhost:3001/api/nodes', {
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-            });
-            const data = await resp.json();
-            if (data.ok && data.nodes && data.nodes.length) {
-                list.innerHTML = data.nodes.map(n => `
+        document.getElementById('clearViewBtn')?.addEventListener('click', () => {
+            if (confirm('Очистить сообщения на экране?')) {
+                const wrap = document.getElementById('messagesWrap');
+                if (wrap) wrap.innerHTML = '<div class="empty-chat" id="emptyChat">💬 Экран очищен</div>';
+            }
+        });
+
+        document.getElementById('refreshBtn')?.addEventListener('click', fetchNewMessages);
+
+        // ── Command Palette (Ctrl+K) ──────────────────────────────
+        const cmdPaletteOverlay = document.getElementById('cmdPaletteOverlay');
+        const cmdPaletteInput = document.getElementById('cmdPaletteInput');
+
+        function openCmdPalette() {
+            if (cmdPaletteOverlay && cmdPaletteInput) {
+                cmdPaletteOverlay.classList.add('open');
+                cmdPaletteInput.value = '';
+                cmdPaletteInput.focus();
+            }
+        }
+
+        cmdPaletteOverlay?.addEventListener('click', e => {
+            if (e.target === cmdPaletteOverlay) cmdPaletteOverlay.classList.remove('open');
+        });
+
+        // ── Hotkeys ───────────────────────────────────────────────
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                if (cmdPaletteOverlay && cmdPaletteOverlay.classList.contains('open')) {
+                    cmdPaletteOverlay.classList.remove('open');
+                    return;
+                }
+                const currentNodesModal = document.getElementById('nodesModal');
+                if (currentNodesModal && currentNodesModal.classList.contains('open')) {
+                    currentNodesModal.classList.remove('open');
+                    return;
+                }
+                const currentAddMemberModal = document.getElementById('addMemberModal');
+                if (currentAddMemberModal && currentAddMemberModal.classList.contains('open')) {
+                    currentAddMemberModal.classList.remove('open');
+                    return;
+                }
+                if (chatInfoPanel && !chatInfoPanel.classList.contains('hidden')) {
+                    chatInfoPanel.classList.add('hidden');
+                    return;
+                }
+                window.location.href = 'index.php';
+            }
+
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                openCmdPalette();
+            }
+        });
+
+        // ── Node Modal ────────────────────────────────────────────
+        const nodesModal = document.getElementById('nodesModal');
+        async function loadNodes() {
+            const list = document.getElementById('nodeListModal');
+            if (!list) return;
+            list.innerHTML = '<div class="text-center text-muted p-16 fs-13">⏳ Загрузка узлов...</div>';
+            try {
+                const token = await getJWT();
+                const resp = await fetch('http://localhost:3001/api/nodes', {
+                    headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+                });
+                const data = await resp.json();
+                if (data.ok && data.nodes && data.nodes.length) {
+                    list.innerHTML = data.nodes.map(n => `
                     <div class="node-list-item ${wsCurrentUrl === n.ws_url ? 'selected' : ''}" data-ws="${escHtml(n.ws_url)}">
                         <div class="node-dot ${n.online ? 'connected' : 'error'}"></div>
                         <div class="node-info">
@@ -726,17 +827,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         </span>
                     </div>
                 `).join('');
-            } else {
+                } else {
+                    list.innerHTML = '';
+                }
+            } catch (e) {
                 list.innerHTML = '';
             }
-        } catch (e) {
-            list.innerHTML = '';
-        }
 
-        const localItem = document.createElement('div');
-        localItem.className = `node-list-item ${wsCurrentUrl === 'ws://localhost:3001' ? 'selected' : ''}`;
-        localItem.dataset.ws = 'ws://localhost:3001';
-        localItem.innerHTML = `
+            const localItem = document.createElement('div');
+            localItem.className = `node-list-item ${wsCurrentUrl === 'ws://localhost:3001' ? 'selected' : ''}`;
+            localItem.dataset.ws = 'ws://localhost:3001';
+            localItem.innerHTML = `
             <div class="node-dot connected"></div>
             <div class="node-info">
                 <div class="node-name">Локальный узел</div>
@@ -744,84 +845,84 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <span class="node-ping text-success">● онлайн</span>
         `;
-        localItem.addEventListener('click', () => {
-            localStorage.setItem('nt-node', 'ws://localhost:3001');
-            nodesModal?.classList.remove('open');
-            wsConnect('ws://localhost:3001');
-        });
-        list.prepend(localItem);
-
-        list.querySelectorAll('.node-list-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const wsUrl = item.dataset.ws;
-                if (wsUrl) {
-                    localStorage.setItem('nt-node', wsUrl);
-                    nodesModal?.classList.remove('open');
-                    wsConnect(wsUrl);
-                }
+            localItem.addEventListener('click', () => {
+                localStorage.setItem('nt-node', 'ws://localhost:3001');
+                nodesModal?.classList.remove('open');
+                wsConnect('ws://localhost:3001');
             });
-        });
-    }
+            list.prepend(localItem);
 
-    const openNodes = () => {
+            list.querySelectorAll('.node-list-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const wsUrl = item.dataset.ws;
+                    if (wsUrl) {
+                        localStorage.setItem('nt-node', wsUrl);
+                        nodesModal?.classList.remove('open');
+                        wsConnect(wsUrl);
+                    }
+                });
+            });
+        }
+
+        const openNodes = () => {
+            if (nodesModal) {
+                nodesModal.classList.add('open');
+                loadNodes();
+            }
+        };
+
+        document.getElementById('openNodesModal')?.addEventListener('click', openNodes);
+        document.getElementById('nodeIndicator')?.addEventListener('click', openNodes);
+        document.getElementById('changeNodeBtn')?.addEventListener('click', openNodes);
+        document.getElementById('closeNodesModal')?.addEventListener('click', () => nodesModal?.classList.remove('open'));
         if (nodesModal) {
-            nodesModal.classList.add('open');
-            loadNodes();
+            nodesModal.addEventListener('click', e => {
+                if (e.target === nodesModal) nodesModal.classList.remove('open');
+            });
         }
-    };
 
-    document.getElementById('openNodesModal')?.addEventListener('click', openNodes);
-    document.getElementById('nodeIndicator')?.addEventListener('click', openNodes);
-    document.getElementById('changeNodeBtn')?.addEventListener('click', openNodes);
-    document.getElementById('closeNodesModal')?.addEventListener('click', () => nodesModal?.classList.remove('open'));
-    if (nodesModal) {
-        nodesModal.addEventListener('click', e => {
-            if (e.target === nodesModal) nodesModal.classList.remove('open');
-        });
-    }
-
-    document.getElementById('connectCustomNode')?.addEventListener('click', () => {
-        const addrInput = document.getElementById('customNodeInput');
-        const addr = addrInput ? addrInput.value.trim() : '';
-        if (!addr.startsWith('ws://') && !addr.startsWith('wss://')) {
-            showToast('Адрес должен начинаться с ws:// или wss://', 'error');
-            return;
-        }
-        localStorage.setItem('nt-node', addr);
-        nodesModal?.classList.remove('open');
-        wsConnect(addr);
-    });
-
-    // ── Sidebar User Search ───────────────────────────────────
-    const searchInput = document.getElementById('userSearch');
-    const searchDropdown = document.getElementById('searchDropdown');
-    let searchTimer;
-    if (searchInput && searchDropdown) {
-        searchInput.addEventListener('input', () => {
-            clearTimeout(searchTimer);
-            const q = searchInput.value.trim();
-            if (q.length < 1) {
-                searchDropdown.innerHTML = '';
-                searchDropdown.classList.remove('visible');
+        document.getElementById('connectCustomNode')?.addEventListener('click', () => {
+            const addrInput = document.getElementById('customNodeInput');
+            const addr = addrInput ? addrInput.value.trim() : '';
+            if (!addr.startsWith('ws://') && !addr.startsWith('wss://')) {
+                showToast('Адрес должен начинаться с ws:// или wss://', 'error');
                 return;
             }
-            searchTimer = setTimeout(async () => {
-                try {
-                    const resp = await fetch(`api/search_users.php?q=${encodeURIComponent(q)}`);
-                    const users = await resp.json();
-                    if (!users.length) {
-                        searchDropdown.innerHTML = '<div class="search-no-result">Никого не найдено</div>';
-                        searchDropdown.classList.add('visible');
-                        return;
-                    }
-                    searchDropdown.innerHTML = users.map(u => {
-                        const av = u.avatar_path
-                            ? `<img src="api/avatar.php?path=${encodeURIComponent(u.avatar_path)}" class="avatar-img" alt="${escHtml(u.username)}">`
-                            : escHtml((u.display_name || u.username)[0].toUpperCase());
-                        const bio = u.status_text
-                            ? `<div class="result-bio">“${escHtml(u.status_text)}”</div>`
-                            : '';
-                        return `
+            localStorage.setItem('nt-node', addr);
+            nodesModal?.classList.remove('open');
+            wsConnect(addr);
+        });
+
+        // ── Sidebar User Search ───────────────────────────────────
+        const searchInput = document.getElementById('userSearch');
+        const searchDropdown = document.getElementById('searchDropdown');
+        let searchTimer;
+        if (searchInput && searchDropdown) {
+            searchInput.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                const q = searchInput.value.trim();
+                if (q.length < 1) {
+                    searchDropdown.innerHTML = '';
+                    searchDropdown.classList.remove('visible');
+                    return;
+                }
+                searchTimer = setTimeout(async () => {
+                    try {
+                        const resp = await fetch(`api/search_users.php?q=${encodeURIComponent(q)}`);
+                        const users = await resp.json();
+                        if (!users.length) {
+                            searchDropdown.innerHTML = '<div class="search-no-result">Никого не найдено</div>';
+                            searchDropdown.classList.add('visible');
+                            return;
+                        }
+                        searchDropdown.innerHTML = users.map(u => {
+                            const av = u.avatar_path
+                                ? `<img src="api/avatar.php?path=${encodeURIComponent(u.avatar_path)}" class="avatar-img" alt="${escHtml(u.username)}">`
+                                : escHtml((u.display_name || u.username)[0].toUpperCase());
+                            const bio = u.status_text
+                                ? `<div class="result-bio">“${escHtml(u.status_text)}”</div>`
+                                : '';
+                            return `
                             <div class="search-result-item" data-id="${u.id}">
                                 <div class="avatar avatar-sm">${av}</div>
                                 <div class="search-result-info">
@@ -830,183 +931,183 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
                             </div>
                         `;
-                    }).join('');
-                    searchDropdown.classList.add('visible');
-                    searchDropdown.querySelectorAll('.search-result-item').forEach(item => {
-                        item.addEventListener('click', () => {
-                            const form = document.createElement('form');
-                            form.method = 'POST';
-                            form.action = 'api/create_chat.php';
-                            form.innerHTML = `<input type="hidden" name="user_id" value="${item.dataset.id}">`;
-                            document.body.appendChild(form);
-                            form.submit();
+                        }).join('');
+                        searchDropdown.classList.add('visible');
+                        searchDropdown.querySelectorAll('.search-result-item').forEach(item => {
+                            item.addEventListener('click', () => {
+                                const form = document.createElement('form');
+                                form.method = 'POST';
+                                form.action = 'api/create_chat.php';
+                                form.innerHTML = `<input type="hidden" name="user_id" value="${item.dataset.id}">`;
+                                document.body.appendChild(form);
+                                form.submit();
+                            });
                         });
+                    } catch (e) { }
+                }, 250);
+            });
+            document.addEventListener('click', e => {
+                if (!e.target.closest('#searchBox')) {
+                    searchDropdown.classList.remove('visible');
+                }
+            });
+        }
+
+        // ── Member Profile Modal (View member details in group) ────
+        const memberProfileModal = document.getElementById('memberProfileModal');
+        const closeMemberProfileModal = document.getElementById('closeMemberProfileModal');
+        const memberModalAvatar = document.getElementById('memberModalAvatar');
+        const memberModalName = document.getElementById('memberModalName');
+        const memberModalUsername = document.getElementById('memberModalUsername');
+        const memberModalBio = document.getElementById('memberModalBio');
+        const memberModalStartChatBtn = document.getElementById('memberModalStartChatBtn');
+
+        function openMemberProfile(data) {
+            if (!memberProfileModal) return;
+            const uid = data.userId;
+            const uname = data.username || 'Пользователь';
+            const dname = data.displayName || uname;
+            const status = data.status || '';
+            const avUrl = data.avatar || '';
+
+            if (memberModalAvatar) {
+                if (avUrl) {
+                    memberModalAvatar.innerHTML = `<img src="${escHtml(avUrl)}" alt="${escHtml(dname)}" class="avatar-img">`;
+                } else {
+                    memberModalAvatar.textContent = (dname || uname)[0].toUpperCase();
+                }
+            }
+            if (memberModalName) memberModalName.textContent = dname;
+            if (memberModalUsername) memberModalUsername.textContent = '@' + uname;
+            if (memberModalBio) {
+                if (status.trim()) {
+                    memberModalBio.textContent = `“${status}”`;
+                    memberModalBio.classList.remove('text-muted');
+                } else {
+                    memberModalBio.textContent = 'Пользователь не указал информацию о себе';
+                    memberModalBio.classList.add('text-muted');
+                }
+            }
+
+            if (memberModalStartChatBtn) {
+                if (String(uid) === String(window.CHAT_CONFIG?.userId)) {
+                    memberModalStartChatBtn.style.display = 'none';
+                } else {
+                    memberModalStartChatBtn.style.display = 'block';
+                    memberModalStartChatBtn.onclick = () => {
+                        const form = document.createElement('form');
+                        form.method = 'POST';
+                        form.action = 'api/create_chat.php';
+                        form.innerHTML = `<input type="hidden" name="user_id" value="${uid}">`;
+                        document.body.appendChild(form);
+                        form.submit();
+                    };
+                }
+            }
+
+            memberProfileModal.classList.add('open');
+        }
+
+        function closeMemberProfile() {
+            if (memberProfileModal) memberProfileModal.classList.remove('open');
+        }
+
+        closeMemberProfileModal?.addEventListener('click', closeMemberProfile);
+        if (memberProfileModal) {
+            memberProfileModal.addEventListener('click', e => {
+                if (e.target === memberProfileModal) closeMemberProfile();
+            });
+        }
+
+        function attachMemberRowListeners() {
+            document.querySelectorAll('#chatMembersList .member-item-row').forEach(row => {
+                if (row.dataset.hasListener) return;
+                row.dataset.hasListener = '1';
+                row.addEventListener('click', () => {
+                    openMemberProfile({
+                        userId: row.dataset.userId,
+                        username: row.dataset.username,
+                        displayName: row.dataset.displayName,
+                        status: row.dataset.status,
+                        avatar: row.dataset.avatar
                     });
-                } catch (e) {}
-            }, 250);
-        });
-        document.addEventListener('click', e => {
-            if (!e.target.closest('#searchBox')) {
-                searchDropdown.classList.remove('visible');
-            }
-        });
-    }
-
-    // ── Member Profile Modal (View member details in group) ────
-    const memberProfileModal = document.getElementById('memberProfileModal');
-    const closeMemberProfileModal = document.getElementById('closeMemberProfileModal');
-    const memberModalAvatar = document.getElementById('memberModalAvatar');
-    const memberModalName = document.getElementById('memberModalName');
-    const memberModalUsername = document.getElementById('memberModalUsername');
-    const memberModalBio = document.getElementById('memberModalBio');
-    const memberModalStartChatBtn = document.getElementById('memberModalStartChatBtn');
-
-    function openMemberProfile(data) {
-        if (!memberProfileModal) return;
-        const uid = data.userId;
-        const uname = data.username || 'Пользователь';
-        const dname = data.displayName || uname;
-        const status = data.status || '';
-        const avUrl = data.avatar || '';
-
-        if (memberModalAvatar) {
-            if (avUrl) {
-                memberModalAvatar.innerHTML = `<img src="${escHtml(avUrl)}" alt="${escHtml(dname)}" class="avatar-img">`;
-            } else {
-                memberModalAvatar.textContent = (dname || uname)[0].toUpperCase();
-            }
-        }
-        if (memberModalName) memberModalName.textContent = dname;
-        if (memberModalUsername) memberModalUsername.textContent = '@' + uname;
-        if (memberModalBio) {
-            if (status.trim()) {
-                memberModalBio.textContent = `“${status}”`;
-                memberModalBio.classList.remove('text-muted');
-            } else {
-                memberModalBio.textContent = 'Пользователь не указал информацию о себе';
-                memberModalBio.classList.add('text-muted');
-            }
-        }
-
-        if (memberModalStartChatBtn) {
-            if (String(uid) === String(window.CHAT_CONFIG?.userId)) {
-                memberModalStartChatBtn.style.display = 'none';
-            } else {
-                memberModalStartChatBtn.style.display = 'block';
-                memberModalStartChatBtn.onclick = () => {
-                    const form = document.createElement('form');
-                    form.method = 'POST';
-                    form.action = 'api/create_chat.php';
-                    form.innerHTML = `<input type="hidden" name="user_id" value="${uid}">`;
-                    document.body.appendChild(form);
-                    form.submit();
-                };
-            }
-        }
-
-        memberProfileModal.classList.add('open');
-    }
-
-    function closeMemberProfile() {
-        if (memberProfileModal) memberProfileModal.classList.remove('open');
-    }
-
-    closeMemberProfileModal?.addEventListener('click', closeMemberProfile);
-    if (memberProfileModal) {
-        memberProfileModal.addEventListener('click', e => {
-            if (e.target === memberProfileModal) closeMemberProfile();
-        });
-    }
-
-    function attachMemberRowListeners() {
-        document.querySelectorAll('#chatMembersList .member-item-row').forEach(row => {
-            if (row.dataset.hasListener) return;
-            row.dataset.hasListener = '1';
-            row.addEventListener('click', () => {
-                openMemberProfile({
-                    userId: row.dataset.userId,
-                    username: row.dataset.username,
-                    displayName: row.dataset.displayName,
-                    status: row.dataset.status,
-                    avatar: row.dataset.avatar
                 });
             });
-        });
-    }
-    attachMemberRowListeners();
-
-    // ── Add Member Modal & Form (Now at root level) ────────────
-    const openAddMemberBtn = document.getElementById('openAddMemberBtn');
-    const headerAddMemberBtn = document.getElementById('headerAddMemberBtn');
-    const addMemberModal = document.getElementById('addMemberModal');
-    const closeAddMemberModal = document.getElementById('closeAddMemberModal');
-    const addMemberForm = document.getElementById('addMemberForm');
-    const newMemberUsernameInput = document.getElementById('newMemberUsername');
-    const newMemberUserId = document.getElementById('newMemberUserId');
-    const addMemberDropdown = document.getElementById('addMemberDropdown');
-
-    function openAddMemberDialog() {
-        if (!addMemberModal) return;
-        addMemberModal.classList.add('open');
-        if (newMemberUsernameInput) {
-            newMemberUsernameInput.value = '';
-            if (newMemberUserId) newMemberUserId.value = '';
-            setTimeout(() => newMemberUsernameInput.focus(), 60);
         }
-        if (addMemberDropdown) {
-            addMemberDropdown.innerHTML = '';
-            addMemberDropdown.classList.remove('visible');
-        }
-    }
+        attachMemberRowListeners();
 
-    function closeAddMemberDialog() {
-        if (!addMemberModal) return;
-        addMemberModal.classList.remove('open');
-        if (addMemberDropdown) addMemberDropdown.classList.remove('visible');
-    }
+        // ── Add Member Modal & Form (Now at root level) ────────────
+        const openAddMemberBtn = document.getElementById('openAddMemberBtn');
+        const headerAddMemberBtn = document.getElementById('headerAddMemberBtn');
+        const addMemberModal = document.getElementById('addMemberModal');
+        const closeAddMemberModal = document.getElementById('closeAddMemberModal');
+        const addMemberForm = document.getElementById('addMemberForm');
+        const newMemberUsernameInput = document.getElementById('newMemberUsername');
+        const newMemberUserId = document.getElementById('newMemberUserId');
+        const addMemberDropdown = document.getElementById('addMemberDropdown');
 
-    openAddMemberBtn?.addEventListener('click', openAddMemberDialog);
-    headerAddMemberBtn?.addEventListener('click', openAddMemberDialog);
-    closeAddMemberModal?.addEventListener('click', closeAddMemberDialog);
-
-    if (addMemberModal) {
-        addMemberModal.addEventListener('click', e => {
-            if (e.target === addMemberModal) {
-                closeAddMemberDialog();
+        function openAddMemberDialog() {
+            if (!addMemberModal) return;
+            addMemberModal.classList.add('open');
+            if (newMemberUsernameInput) {
+                newMemberUsernameInput.value = '';
+                if (newMemberUserId) newMemberUserId.value = '';
+                setTimeout(() => newMemberUsernameInput.focus(), 60);
             }
-        });
-    }
-
-    // Live search suggestions inside Add Member modal
-    let addMemberSearchTimeout = null;
-    if (newMemberUsernameInput && addMemberDropdown) {
-        newMemberUsernameInput.addEventListener('input', () => {
-            clearTimeout(addMemberSearchTimeout);
-            const q = newMemberUsernameInput.value.trim().replace(/^@/, '');
-            if (q.length < 1) {
+            if (addMemberDropdown) {
                 addMemberDropdown.innerHTML = '';
                 addMemberDropdown.classList.remove('visible');
-                return;
             }
+        }
 
-            addMemberSearchTimeout = setTimeout(async () => {
-                try {
-                    const resp = await fetch(`api/search_users.php?q=${encodeURIComponent(q)}`);
-                    const users = await resp.json();
-                    if (!users.length) {
-                        addMemberDropdown.innerHTML = '<div class="search-no-result p-12 text-muted fs-12">Пользователи не найдены</div>';
-                        addMemberDropdown.classList.add('visible');
-                        return;
-                    }
+        function closeAddMemberDialog() {
+            if (!addMemberModal) return;
+            addMemberModal.classList.remove('open');
+            if (addMemberDropdown) addMemberDropdown.classList.remove('visible');
+        }
 
-                    addMemberDropdown.innerHTML = users.map(u => {
-                        const av = u.avatar_path
-                            ? `<img src="api/avatar.php?path=${encodeURIComponent(u.avatar_path)}" class="avatar-img" alt="${escHtml(u.username)}">`
-                            : escHtml((u.display_name || u.username)[0].toUpperCase());
-                        const bio = u.status_text
-                            ? `<div class="result-bio">“${escHtml(u.status_text)}”</div>`
-                            : '';
-                        return `
+        openAddMemberBtn?.addEventListener('click', openAddMemberDialog);
+        headerAddMemberBtn?.addEventListener('click', openAddMemberDialog);
+        closeAddMemberModal?.addEventListener('click', closeAddMemberDialog);
+
+        if (addMemberModal) {
+            addMemberModal.addEventListener('click', e => {
+                if (e.target === addMemberModal) {
+                    closeAddMemberDialog();
+                }
+            });
+        }
+
+        // Live search suggestions inside Add Member modal
+        let addMemberSearchTimeout = null;
+        if (newMemberUsernameInput && addMemberDropdown) {
+            newMemberUsernameInput.addEventListener('input', () => {
+                clearTimeout(addMemberSearchTimeout);
+                const q = newMemberUsernameInput.value.trim().replace(/^@/, '');
+                if (q.length < 1) {
+                    addMemberDropdown.innerHTML = '';
+                    addMemberDropdown.classList.remove('visible');
+                    return;
+                }
+
+                addMemberSearchTimeout = setTimeout(async () => {
+                    try {
+                        const resp = await fetch(`api/search_users.php?q=${encodeURIComponent(q)}`);
+                        const users = await resp.json();
+                        if (!users.length) {
+                            addMemberDropdown.innerHTML = '<div class="search-no-result p-12 text-muted fs-12">Пользователи не найдены</div>';
+                            addMemberDropdown.classList.add('visible');
+                            return;
+                        }
+
+                        addMemberDropdown.innerHTML = users.map(u => {
+                            const av = u.avatar_path
+                                ? `<img src="api/avatar.php?path=${encodeURIComponent(u.avatar_path)}" class="avatar-img" alt="${escHtml(u.username)}">`
+                                : escHtml((u.display_name || u.username)[0].toUpperCase());
+                            const bio = u.status_text
+                                ? `<div class="result-bio">“${escHtml(u.status_text)}”</div>`
+                                : '';
+                            return `
                             <div class="search-result-item" data-id="${u.id}" data-username="${escHtml(u.username)}" data-name="${escHtml(u.display_name || u.username)}">
                                 <div class="avatar avatar-sm">${av}</div>
                                 <div class="search-result-info">
@@ -1015,86 +1116,86 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
                             </div>
                         `;
-                    }).join('');
-                    addMemberDropdown.classList.add('visible');
+                        }).join('');
+                        addMemberDropdown.classList.add('visible');
 
-                    addMemberDropdown.querySelectorAll('.search-result-item').forEach(item => {
-                        item.addEventListener('click', () => {
-                            newMemberUsernameInput.value = item.dataset.username;
-                            if (newMemberUserId) newMemberUserId.value = item.dataset.id;
-                            addMemberDropdown.classList.remove('visible');
+                        addMemberDropdown.querySelectorAll('.search-result-item').forEach(item => {
+                            item.addEventListener('click', () => {
+                                newMemberUsernameInput.value = item.dataset.username;
+                                if (newMemberUserId) newMemberUserId.value = item.dataset.id;
+                                addMemberDropdown.classList.remove('visible');
+                            });
                         });
+                    } catch (e) { }
+                }, 200);
+            });
+
+            document.addEventListener('click', e => {
+                if (!e.target.closest('#addMemberModal')) {
+                    addMemberDropdown.classList.remove('visible');
+                }
+            });
+        }
+
+        if (addMemberForm) {
+            addMemberForm.addEventListener('submit', async e => {
+                e.preventDefault();
+                const submitBtn = addMemberForm.querySelector('button[type="submit"]');
+                const usernameVal = newMemberUsernameInput ? newMemberUsernameInput.value.trim() : '';
+                if (!usernameVal) {
+                    showToast('Введите имя пользователя', 'error');
+                    return;
+                }
+
+                const originalBtnText = submitBtn ? submitBtn.textContent : '';
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Добавление...';
+                }
+
+                try {
+                    const formData = new FormData(addMemberForm);
+                    const resp = await fetch('api/add_chat_member.php', {
+                        method: 'POST',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json'
+                        },
+                        body: formData
                     });
-                } catch (e) {}
-            }, 200);
-        });
 
-        document.addEventListener('click', e => {
-            if (!e.target.closest('#addMemberModal')) {
-                addMemberDropdown.classList.remove('visible');
-            }
-        });
-    }
+                    const data = await resp.json().catch(() => null);
 
-    if (addMemberForm) {
-        addMemberForm.addEventListener('submit', async e => {
-            e.preventDefault();
-            const submitBtn = addMemberForm.querySelector('button[type="submit"]');
-            const usernameVal = newMemberUsernameInput ? newMemberUsernameInput.value.trim() : '';
-            if (!usernameVal) {
-                showToast('Введите имя пользователя', 'error');
-                return;
-            }
+                    if (resp.ok && data && data.ok) {
+                        showToast('✅ Пользователь добавлен в группу!', 'success');
+                        closeAddMemberDialog();
 
-            const originalBtnText = submitBtn ? submitBtn.textContent : '';
-            if (submitBtn) {
-                submitBtn.disabled = true;
-                submitBtn.textContent = 'Добавление...';
-            }
+                        const addedUname = data.username || usernameVal.replace(/^@/, '');
+                        const addedDname = data.display_name || addedUname;
+                        const addedBio = data.status_text || '';
+                        const addedAvatar = data.avatar_url || '';
+                        const addedUid = data.user_id || '';
 
-            try {
-                const formData = new FormData(addMemberForm);
-                const resp = await fetch('api/add_chat_member.php', {
-                    method: 'POST',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Accept': 'application/json'
-                    },
-                    body: formData
-                });
+                        const membersList = document.getElementById('chatMembersList');
+                        if (membersList) {
+                            const row = document.createElement('div');
+                            row.className = 'member-item-row';
+                            row.dataset.userId = addedUid;
+                            row.dataset.username = addedUname;
+                            row.dataset.displayName = addedDname;
+                            row.dataset.status = addedBio;
+                            row.dataset.avatar = addedAvatar;
+                            row.title = 'Нажмите, чтобы просмотреть профиль';
 
-                const data = await resp.json().catch(() => null);
+                            const avatarContent = addedAvatar
+                                ? `<img src="${escHtml(addedAvatar)}" alt="${escHtml(addedDname)}" class="avatar-img">`
+                                : escHtml(addedDname[0].toUpperCase());
 
-                if (resp.ok && data && data.ok) {
-                    showToast('✅ Пользователь добавлен в группу!', 'success');
-                    closeAddMemberDialog();
+                            const statusHtml = addedBio
+                                ? `<div class="member-item-status" title="${escHtml(addedBio)}">${escHtml(addedBio.substring(0, 36))}${addedBio.length > 36 ? '…' : ''}</div>`
+                                : '';
 
-                    const addedUname = data.username || usernameVal.replace(/^@/, '');
-                    const addedDname = data.display_name || addedUname;
-                    const addedBio = data.status_text || '';
-                    const addedAvatar = data.avatar_url || '';
-                    const addedUid = data.user_id || '';
-
-                    const membersList = document.getElementById('chatMembersList');
-                    if (membersList) {
-                        const row = document.createElement('div');
-                        row.className = 'member-item-row';
-                        row.dataset.userId = addedUid;
-                        row.dataset.username = addedUname;
-                        row.dataset.displayName = addedDname;
-                        row.dataset.status = addedBio;
-                        row.dataset.avatar = addedAvatar;
-                        row.title = 'Нажмите, чтобы просмотреть профиль';
-
-                        const avatarContent = addedAvatar
-                            ? `<img src="${escHtml(addedAvatar)}" alt="${escHtml(addedDname)}" class="avatar-img">`
-                            : escHtml(addedDname[0].toUpperCase());
-
-                        const statusHtml = addedBio
-                            ? `<div class="member-item-status" title="${escHtml(addedBio)}">${escHtml(addedBio.substring(0, 36))}${addedBio.length > 36 ? '…' : ''}</div>`
-                            : '';
-
-                        row.innerHTML = `
+                            row.innerHTML = `
                             <div class="avatar avatar-sm">${avatarContent}</div>
                             <div class="member-info-col">
                                 <div class="member-item-name-wrap">
@@ -1103,39 +1204,147 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ${statusHtml}
                             </div>
                         `;
-                        membersList.appendChild(row);
-                        attachMemberRowListeners();
-                    }
+                            membersList.appendChild(row);
+                            attachMemberRowListeners();
+                        }
 
-                    // Update count indicators in UI
-                    const currentCount = membersList ? membersList.children.length : null;
-                    if (currentCount !== null) {
-                        const countTitle = document.getElementById('chatMembersCountTitle');
-                        if (countTitle) countTitle.textContent = `Участники (${currentCount})`;
-                        const cs = document.getElementById('chatStatus');
-                        if (cs) cs.textContent = `${currentCount} участников`;
-                        const ss = document.getElementById('sidebarStatus');
-                        if (ss) ss.textContent = `${currentCount} участников`;
+                        // Update count indicators in UI
+                        const currentCount = membersList ? membersList.children.length : null;
+                        if (currentCount !== null) {
+                            const countTitle = document.getElementById('chatMembersCountTitle');
+                            if (countTitle) countTitle.textContent = `Участники (${currentCount})`;
+                            const cs = document.getElementById('chatStatus');
+                            if (cs) cs.textContent = `${currentCount} участников`;
+                            const ss = document.getElementById('sidebarStatus');
+                            if (ss) ss.textContent = `${currentCount} участников`;
+                        }
+                    } else {
+                        const err = (data && data.error) ? data.error : 'Не удалось добавить участника';
+                        showToast('❌ ' + err, 'error');
                     }
-                } else {
-                    const err = (data && data.error) ? data.error : 'Не удалось добавить участника';
-                    showToast('❌ ' + err, 'error');
+                } catch (err) {
+                    console.error('Failed to add member:', err);
+                    showToast('❌ Ошибка сети при добавлении пользователя', 'error');
+                } finally {
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = originalBtnText;
+                    }
                 }
-            } catch (err) {
-                console.error('Failed to add member:', err);
-                showToast('❌ Ошибка сети при добавлении пользователя', 'error');
-            } finally {
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = originalBtnText;
+            });
+        }
+
+        // Initial scroll & WS connect
+        scrollToBottom();
+        updateSidebarBadge();
+        startPolling(1500);
+        wsConnect(wsCurrentUrl);
+        setInterval(() => wsSend({ type: 'ping' }), 30000);
+        initE2EE();
+    });
+
+    // ── E2EE Lifecycle & Initial Decryption ─────────────────────
+    async function decryptAllRenderedMessages() {
+        if (!window.E2EE || !E2EE.available()) return;
+        const chatId = window.CHAT_CONFIG ? window.CHAT_CONFIG.chatId : 0;
+        const curUsername = window.CHAT_CONFIG ? window.CHAT_CONFIG.username : '';
+        const curUserId = window.CHAT_CONFIG ? window.CHAT_CONFIG.userId : 0;
+        const compId = window.CHAT_CONFIG ? window.CHAT_CONFIG.companionId : 0;
+
+        const msgs = document.querySelectorAll('#messagesWrap .message');
+        for (const el of msgs) {
+            const raw = el.dataset.content || '';
+            if (!E2EE.isEncrypted(raw)) continue;
+            const isMe = el.classList.contains('out');
+            const senderId = Number(el.dataset.senderId || (isMe ? curUserId : compId));
+            const msgId = el.dataset.id;
+            let plain = null;
+            if (isMe && msgId) {
+                plain = E2EE.cachedSent(chatId, msgId, curUsername);
+            }
+            if (!plain) {
+                try {
+                    plain = await E2EE.decrypt(chatId, senderId, { ciphertext: raw }, curUsername, curUserId);
+                } catch (err) {
+                    // Key not on this device
                 }
             }
-        });
+            const bubble = el.querySelector('.msg-bubble');
+            if (bubble) {
+                if (plain !== null) {
+                    bubble.innerHTML = renderBubbleContent(plain) + '<span class="msg-e2e-lock" title="🔐 Сквозное шифрование E2EE (расшифровано)">🔒</span>';
+                } else {
+                    bubble.innerHTML = '<div class="e2e-encrypted-placeholder"><span class="e2e-lock-icon">🔐</span> <em>Зашифрованное сообщение</em><div class="e2e-sub">Ключ недоступен на этом устройстве</div></div>';
+                }
+            }
+        }
     }
 
-    // Initial scroll & WS connect
-    scrollToBottom();
-    updateSidebarBadge();
-    wsConnect(wsCurrentUrl);
-    setInterval(() => wsSend({ type: 'ping' }), 30000);
-});
+    async function initE2EE() {
+        const diag = window.E2EE && E2EE.diagnose ? E2EE.diagnose() : { ok: window.E2EE && E2EE.available() };
+        if (!diag.ok) {
+            const statusEl = document.getElementById('e2eStatusVal');
+            if (statusEl) {
+                if (diag.reason === 'insecure_context') {
+                    const httpsUrl = 'https://' + location.host + location.pathname + location.search;
+                    statusEl.innerHTML = `⚠️ Отключен браузером на HTTP (<a href="${httpsUrl}" style="color:#6C63FF; text-decoration:underline; font-weight:600;">включить через HTTPS</a>)`;
+                    statusEl.className = 'info-row-val text-warning';
+                } else {
+                    statusEl.textContent = '⚠️ Web Crypto недоступен';
+                    statusEl.className = 'info-row-val text-warning';
+                }
+            }
+            return;
+        }
+
+        const curUsername = window.CHAT_CONFIG ? window.CHAT_CONFIG.username : '';
+        const isGroup = window.CHAT_CONFIG ? window.CHAT_CONFIG.isGroup : false;
+        const compPub = window.CHAT_CONFIG ? window.CHAT_CONFIG.companionPublicKey : null;
+
+        try {
+            const myIdentity = await E2EE.ensureIdentity(curUsername);
+            if (myIdentity && myIdentity.pub) {
+                fetch('api/sync_key.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ public_key: myIdentity.pub })
+                }).catch(() => { });
+            }
+
+            const statusEl = document.getElementById('e2eStatusVal');
+            const fpRow = document.getElementById('e2eFingerprintRow');
+            const fpVal = document.getElementById('e2eFingerprintVal');
+
+            if (!isGroup) {
+                if (compPub) {
+                    if (statusEl) {
+                        statusEl.textContent = '🔐 E2EE (Активно)';
+                        statusEl.className = 'info-row-val text-success';
+                    }
+                    if (fpVal) {
+                        fpVal.textContent = await E2EE.fingerprint(compPub);
+                    }
+                } else {
+                    if (statusEl) {
+                        statusEl.textContent = '🔓 Обычный режим (собеседник без ключа)';
+                        statusEl.className = 'info-row-val text-muted';
+                    }
+                    if (fpRow) fpRow.style.display = 'none';
+                }
+            } else {
+                const members = (window.CHAT_CONFIG && window.CHAT_CONFIG.members) || [];
+                const withKeys = members.filter(m => m.public_key).length;
+                if (statusEl) {
+                    statusEl.textContent = `🔐 E2EE Группа (${withKeys}/${members.length} с ключами)`;
+                    statusEl.className = 'info-row-val text-success';
+                }
+                if (fpVal) {
+                    fpVal.textContent = myIdentity ? await E2EE.fingerprint(myIdentity.pub) : '';
+                }
+            }
+
+            await decryptAllRenderedMessages();
+        } catch (e) {
+            console.warn('initE2EE error:', e);
+        }
+    }

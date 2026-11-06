@@ -23,6 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password = $_POST['password'] ?? '';
     $passwordConfirm = $_POST['password_confirm'] ?? '';
     $homeNodeId = (int) ($_POST['home_node_id'] ?? 0);
+    $publicKey = trim($_POST['public_key'] ?? '');
     $agree = isset($_POST['agree']);
 
     // Client-side validation (redundant with server but good UX)
@@ -54,24 +55,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($errors)) {
         // По ТЗ раздел 6.6: узел проксирует запрос на сервер авторизации
-        $response = callNodeApi('POST', '/auth/register', [
+        $regData = [
             'username' => $username,
             'password' => $password,
             'email' => $email,
             'display_name' => $displayName,
             'home_node_id' => $homeNodeId ?: null,
-        ]);
+            'public_key' => $publicKey ?: null
+        ];
+        $response = callNodeApi('POST', '/auth/register', $regData);
 
         // Если узел оффлайн или не отвечает, обращаемся напрямую к auth-серверу
         if (!isset($response['ok']) || !$response['ok']) {
             if (isset($response['error']) && ($response['error'] === 'Node offline' || str_contains($response['error'], 'Offline'))) {
-                $response = callAuthApi('POST', '/auth/register', [
-                    'username' => $username,
-                    'password' => $password,
-                    'email' => $email,
-                    'display_name' => $displayName,
-                    'home_node_id' => $homeNodeId ?: null,
-                ]);
+                $response = callAuthApi('POST', '/auth/register', $regData);
             }
         }
 
@@ -196,6 +193,7 @@ require __DIR__ . '/templates/partials/head.php';
             <div class="field-error field-error-agree"><?= htmlspecialchars($errors['agree']) ?></div>
         <?php endif; ?>
 
+        <input type="hidden" id="registerPublicKey" name="public_key" value="">
         <button type="submit" class="btn-submit" id="submitBtn">Зарегистрироваться</button>
     </form>
 
@@ -222,6 +220,7 @@ require __DIR__ . '/templates/partials/head.php';
     </div>
 </div>
 
+<script src="assets/js/crypto.js"></script>
 <script src="assets/js/app.js"></script>
 <script src="assets/js/auth.js"></script>
 <script>

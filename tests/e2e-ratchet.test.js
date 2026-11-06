@@ -109,6 +109,10 @@ test('старый ratchet-ключ собеседника читается из
   published[BOB] = staleR1;
   await alice.run(() => E2EE.decrypt(CHAT, BOB, r1, 'alice', ALICE));
 
+  const m2 = await alice.run(() => E2EE.encrypt(CHAT, 'private', [{ id: BOB, pub: published[BOB] }], 'второе', 'alice'));
+  published[ALICE] = m2.public_key;
+  await bob.run(() => E2EE.decrypt(CHAT, ALICE, m2, 'bob', BOB));
+
   const r2 = await bob.run(() => E2EE.encrypt(CHAT, 'private', [{ id: ALICE, pub: published[ALICE] }], 'ответ 2', 'bob'));
   published[BOB] = r2.public_key;
   await alice.run(() => E2EE.decrypt(CHAT, BOB, r2, 'alice', ALICE));
@@ -215,4 +219,28 @@ test('экспорт без пароля и генерация новых клю
   assert.notEqual(regenerated.pub, identity.pub, 'сгенерирован новый keypair');
   assert.equal(await alice.run(() => E2EE.outgoingPublicKey('alice', 1)), null, 'ratchet-состояния очищены');
   assert.ok(regenerated.privJwk.d);
+});
+
+test('isEncrypted и decryptSafe корректно определяют и обрабатывают шифрованный и нешифрованный контент', async () => {
+  const alice = makeDevice('alice');
+  const bob = makeDevice('bob');
+  const aliceIdentity = await alice.run(() => E2EE.ensureIdentity('alice'));
+  const bobIdentity = await bob.run(() => E2EE.ensureIdentity('bob'));
+
+  assert.equal(E2EE.isEncrypted('Простое сообщение'), false);
+  assert.equal(E2EE.isEncrypted(''), false);
+  assert.equal(E2EE.isEncrypted(null), false);
+  assert.equal(E2EE.isEncrypted('[attachment:{"url":"/files/test.png"}]'), false);
+
+  const msg = await alice.run(() => E2EE.encrypt(99, 'private', [{ id: BOB, pub: bobIdentity.pub }], 'Привет, мир!', 'alice'));
+  assert.equal(E2EE.isEncrypted(msg.ciphertext), true);
+
+  const safePlain = await bob.run(() => E2EE.decryptSafe(99, ALICE, 'Обычный текст', 'bob', BOB));
+  assert.equal(safePlain.encrypted, false);
+  assert.equal(safePlain.plaintext, 'Обычный текст');
+
+  const safeCipher = await bob.run(() => E2EE.decryptSafe(99, ALICE, msg.ciphertext, 'bob', BOB));
+  assert.equal(safeCipher.encrypted, true);
+  assert.equal(safeCipher.success, true);
+  assert.equal(safeCipher.plaintext, 'Привет, мир!');
 });

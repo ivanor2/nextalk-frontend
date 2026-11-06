@@ -309,7 +309,8 @@ window.APP_CONFIG = {
   token: <?= json_encode($_SESSION['jwt_token'] ?? '') ?>
 };
 </script>
-<script src="assets/js/app.js"></script>
-<script src="assets/js/index.js"></script>
+<script src="assets/js/crypto.js?v=<?= filemtime(__DIR__ . '/assets/js/crypto.js') ?>"></script>
+<script src="assets/js/app.js?v=<?= filemtime(__DIR__ . '/assets/js/app.js') ?>"></script>
+<script src="assets/js/index.js?v=<?= filemtime(__DIR__ . '/assets/js/index.js') ?>"></script>
 </body>
 </html>

@@ -1,29 +1,18 @@
-# ── Security: Block test/debug files ─────────────────────
-<Files "test.php">
-    Require ip 127.0.0.1 ::1
-</Files>
+# ── Автоматический редирект HTTP -> HTTPS ─────────────────────
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-<Files "test_chats.php">
-    Require ip 127.0.0.1 ::1
-</Files>
+# ── Проброс заголовка Authorization для JWT ───────────────────
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
-# ── Security: Block sensitive files ──────────────────────
-<Files ".env">
+# ── Защита служебных файлов ──────────────────────────────────
+<FilesMatch "^\.(env|git)">
+    Require all denied
+</FilesMatch>
+
+<Files "run.bat">
     Require all denied
 </Files>
-
-<Files ".env.example">
-    Require all denied
-</Files>
-
-<Files "db.php">
-    Require all denied
-</Files>
-
-# ── Security Headers ─────────────────────────────────────
-<IfModule mod_headers.c>
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-Frame-Options "SAMEORIGIN"
-    Header set X-XSS-Protection "1; mode=block"
-    Header set Referrer-Policy "strict-origin-when-cross-origin"
-</IfModule>

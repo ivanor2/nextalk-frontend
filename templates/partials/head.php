@@ -11,5 +11,6 @@ $metaDescription = $metaDescription ?? 'NexTalk — безопасный дец�
     <meta name="description" content="<?= htmlspecialchars($metaDescription) ?>">
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="style.css">
+    <script src="assets/js/crypto.js?v=<?= file_exists(__DIR__ . '/../../assets/js/crypto.js') ? filemtime(__DIR__ . '/../../assets/js/crypto.js') : '1' ?>"></script>
 </head>
 <body class="<?= htmlspecialchars($bodyClass ?? '') ?>">
