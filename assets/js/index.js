@@ -456,6 +456,9 @@ async function fetchChatsList() {
         const data = await resp.json();
         if (data.ok && Array.isArray(data.chats)) {
             renderChatsList(data.chats);
+            if (data.offline) {
+                updateNodeStatus('error', 'Автономный режим');
+            }
         }
     } catch (e) {
     } finally {

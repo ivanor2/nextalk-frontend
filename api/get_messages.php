@@ -16,11 +16,23 @@ if ($chatId <= 0) {
 $response = ApiClient::callNode('GET', "/messages?chat_id=$chatId&last_id=$lastId&limit=100");
 
 if (isset($response['ok']) && $response['ok']) {
+    $msgs = $response['messages'] ?? [];
+    if (!empty($msgs)) {
+        LocalStore::saveMessages($chatId, $msgs);
+    }
     Helpers::json([
         'ok' => true,
-        'messages' => $response['messages'] ?? [],
-        'count' => count($response['messages'] ?? [])
+        'messages' => $msgs,
+        'count' => count($msgs),
+        'offline' => false
     ]);
 } else {
-    Helpers::json(['ok' => false, 'error' => $response['error'] ?? 'API Error'], 400);
+    // Fallback на локальное хранилище, если узел недоступен
+    $cached = LocalStore::getMessagesAfter($chatId, $lastId, 100);
+    Helpers::json([
+        'ok' => true,
+        'messages' => $cached,
+        'count' => count($cached),
+        'offline' => true
+    ]);
 }

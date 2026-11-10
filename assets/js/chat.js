@@ -266,6 +266,45 @@ function renderMessage(msg) {
 
     const atBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 140;
     if (atBottom || isMe) scrollToBottom(true);
+    saveClientMessageBackup(chatId, msg);
+}
+
+// ── Client-side Message Backup & Offline Cache ──────────────
+function saveClientMessageBackup(chatId, msg) {
+    if (!chatId || !msg || !msg.content) return;
+    try {
+        const key = `nt-client-chat-history-${chatId}`;
+        const raw = safeStorage.get(key);
+        const list = raw ? JSON.parse(raw) : [];
+        const msgId = msg.id || ('ws-' + Date.now());
+        if (!list.some(m => String(m.id) === String(msgId))) {
+            list.push({
+                id: msgId,
+                sender: msg.sender || msg.username || '',
+                sender_id: msg.sender_id || msg.user_id || 0,
+                content: msg.content,
+                plaintext: msg.plaintext || null,
+                timestamp: msg.timestamp || msg.created_at || new Date().toISOString()
+            });
+            if (list.length > 200) list.shift();
+            safeStorage.set(key, JSON.stringify(list));
+        }
+    } catch (e) {}
+}
+
+function restoreClientMessageBackup(chatId) {
+    if (!chatId) return;
+    try {
+        const wrap = document.getElementById('messagesWrap');
+        if (!wrap || wrap.querySelectorAll('.message').length > 0) return;
+        const key = `nt-client-chat-history-${chatId}`;
+        const raw = safeStorage.get(key);
+        if (!raw) return;
+        const list = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) {
+            list.forEach(m => renderMessage(m));
+        }
+    } catch (e) {}
 }
 
 // ── Node Status UI ──────────────────────────────────────────
@@ -511,7 +550,16 @@ function showTypingIndicator(show) {
         try {
             const resp = await fetch(`api/get_messages.php?chat_id=${chatId}&last_id=${lastMessageId}&t=${Date.now()}`);
             const data = await resp.json();
-            if (!data.ok || !data.messages?.length) return;
+            if (!data.ok) return;
+
+            if (data.offline) {
+                setNodeStatus('error', 'Автономный режим');
+            } else if (ws && ws.readyState === WebSocket.OPEN) {
+                const banner = document.getElementById('chatOfflineBanner');
+                if (banner) banner.remove();
+            }
+
+            if (!data.messages?.length) return;
             data.messages.forEach(msg => {
                 const numId = Number(msg.id);
                 if (!isNaN(numId) && numId > 0) {
@@ -1234,9 +1282,13 @@ function showTypingIndicator(show) {
             });
         }
 
-        // Initial scroll & WS connect
+        // Restore backup messages if empty & Initial scroll
+        restoreClientMessageBackup(chatId);
         scrollToBottom();
         updateSidebarBadge();
+        if (window.CHAT_CONFIG && window.CHAT_CONFIG.offline) {
+            setNodeStatus('error', 'Автономный режим');
+        }
         startPolling(1500);
         wsConnect(wsCurrentUrl);
         setInterval(() => wsSend({ type: 'ping' }), 30000);

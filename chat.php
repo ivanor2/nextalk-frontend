@@ -6,16 +6,26 @@ $userId = $_SESSION['user_id'];
 $username = $_SESSION['username'];
 $chatId = (int) ($_GET['id'] ?? 0);
 
-// Проверка доступа к чату
+// Проверка доступа к чату (с поддержкой локального кэша LocalStore)
+$isNodeOffline = false;
 $chatResponse = callNodeApi('GET', "/chats/$chatId");
-if (!isset($chatResponse['ok']) || !$chatResponse['ok']) {
-  die('У вас нет доступа к этому чату или он не существует. <a href="index.php">Назад к чатам</a>');
+if (isset($chatResponse['ok']) && $chatResponse['ok']) {
+  $chat = $chatResponse['chat'];
+} else {
+  $cachedChat = LocalStore::getChat($chatId, $userId);
+  if ($cachedChat) {
+    $chat = $cachedChat;
+    $isNodeOffline = true;
+  } else {
+    die('У вас нет доступа к этому чату или он не существует. <a href="index.php">Назад к чатам</a>');
+  }
 }
-$chat = $chatResponse['chat'];
 $isGroup = ($chat['type'] ?? 'private') === 'group';
 
-// Отметить сообщения чата как прочитанные
-callNodeApi('POST', "/chats/$chatId/read");
+// Отметить сообщения чата как прочитанные (только если узел на связи)
+if (!$isNodeOffline) {
+  callNodeApi('POST', "/chats/$chatId/read");
+}
 
 // POST: сохранить сообщение в БД (вызывается из JS)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['message'])) {
@@ -29,9 +39,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['message'])) {
     if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
       header('Content-Type: application/json');
       if (isset($res['ok']) && $res['ok']) {
-        echo json_encode(['ok' => true, 'id' => $res['id'], 'timestamp' => $res['timestamp']]);
+        $msgId = (int)$res['id'];
+        $timestamp = $res['timestamp'] ?? date('Y-m-d H:i:s');
+        LocalStore::saveMessage($chatId, [
+          'id' => $msgId,
+          'sender_id' => $userId,
+          'username' => $username,
+          'content' => $content,
+          'created_at' => $timestamp
+        ]);
+        echo json_encode(['ok' => true, 'id' => $msgId, 'timestamp' => $timestamp]);
       } else {
-        echo json_encode(['ok' => false, 'error' => $res['error'] ?? 'Error']);
+        echo json_encode(['ok' => false, 'error' => $res['error'] ?? 'Узел офлайн']);
       }
       exit;
     }
@@ -52,9 +71,12 @@ $companionPublicKey = null;
 if (!$isGroup) {
   $companionId = $chat['companion_id'] ?? null;
   $companionName = $chat['companion_name'] ?: 'Чат';
-  $companionUsername = $companionName;
+  $companionUsername = $chat['companion_username'] ?? $companionName;
+  $companionAvatarUrl = $chat['companion_avatar_url'] ?? null;
+  $companionBio = $chat['companion_bio'] ?? '';
+  $companionPublicKey = $chat['companion_public_key'] ?? null;
 
-  if ($companionId) {
+  if ($companionId && !$isNodeOffline) {
     $userResp = callAuthApi('GET', "/users/$companionId", null, true);
     if (!empty($userResp['ok']) && !empty($userResp['user'])) {
       $companionUser = $userResp['user'];
@@ -75,19 +97,21 @@ if ($isGroup && !empty($rawMembers)) {
   foreach ($rawMembers as $mem) {
     $mid = (int) $mem['user_id'];
     $mUname = $mem['username'] ?: '';
-    $mDisp = $mUname;
-    $mAvatar = null;
-    $mBio = '';
-    $mPubKey = null;
+    $mDisp = $mem['display_name'] ?? $mUname;
+    $mAvatar = $mem['avatar_path'] ?? null;
+    $mBio = $mem['status_text'] ?? '';
+    $mPubKey = $mem['public_key'] ?? null;
 
-    $mResp = callAuthApi('GET', "/users/$mid", null, true);
-    if (!empty($mResp['ok']) && !empty($mResp['user'])) {
-      $u = $mResp['user'];
-      $mUname = $u['username'];
-      $mDisp = $u['display_name'] ?: $mUname;
-      $mAvatar = $u['avatar_path'] ?? null;
-      $mBio = trim($u['status_text'] ?? '');
-      $mPubKey = $u['public_key'] ?? null;
+    if (!$isNodeOffline) {
+      $mResp = callAuthApi('GET', "/users/$mid", null, true);
+      if (!empty($mResp['ok']) && !empty($mResp['user'])) {
+        $u = $mResp['user'];
+        $mUname = $u['username'];
+        $mDisp = $u['display_name'] ?: $mUname;
+        $mAvatar = $u['avatar_path'] ?? null;
+        $mBio = trim($u['status_text'] ?? '');
+        $mPubKey = $u['public_key'] ?? null;
+      }
     }
 
     $members[] = [
@@ -104,12 +128,32 @@ if ($isGroup && !empty($rawMembers)) {
   $members = $rawMembers;
 }
 
-// Начальные сообщения
-$msgResponse = callNodeApi('GET', "/messages?chat_id=$chatId&limit=100");
+// Сохраняем свежие детали чата в LocalStore
+LocalStore::saveChat($userId, array_merge($chat, [
+  'companion_id' => $companionId,
+  'companion_name' => $companionName,
+  'companion_username' => $companionUsername,
+  'companion_avatar_url' => $companionAvatarUrl,
+  'companion_bio' => $companionBio,
+  'companion_public_key' => $companionPublicKey,
+  'members' => $members
+]));
+
+// Начальные сообщения (с fallback на LocalStore)
 $messages = [];
-if (isset($msgResponse['ok']) && $msgResponse['ok']) {
-  $messages = $msgResponse['messages'] ?? [];
+if (!$isNodeOffline) {
+  $msgResponse = callNodeApi('GET', "/messages?chat_id=$chatId&limit=100");
+  if (isset($msgResponse['ok']) && $msgResponse['ok']) {
+    $messages = $msgResponse['messages'] ?? [];
+    LocalStore::saveMessages($chatId, $messages);
+  } else {
+    $messages = LocalStore::getMessages($chatId);
+    $isNodeOffline = true;
+  }
+} else {
+  $messages = LocalStore::getMessages($chatId);
 }
+
 $lastMessageId = !empty($messages) ? (int) end($messages)['id'] : 0;
 $companionInit = mb_strtoupper(mb_substr($companionName, 0, 1));
 $defaultNode = defined('WS_NODE_URL') ? WS_NODE_URL : 'ws://127.0.0.1:3001';
@@ -243,6 +287,13 @@ require __DIR__ . '/templates/partials/head.php';
         <button class="icon-btn" id="toggleInfoBtn" title="Информация о чате">ℹ️</button>
       </div>
     </div>
+
+    <?php if ($isNodeOffline): ?>
+      <div class="chat-offline-banner" id="chatOfflineBanner">
+        <span class="offline-icon">💾</span>
+        <span>Автономный режим: узел офлайн. Показана история сообщений из локального хранилища.</span>
+      </div>
+    <?php endif; ?>
 
     <!-- Messages container -->
     <div class="messages-wrap" id="messagesWrap">
@@ -526,7 +577,8 @@ require __DIR__ . '/templates/partials/head.php';
     members: <?= json_encode($members) ?>,
     lastMessageId: <?= (int) $lastMessageId ?>,
     defaultNode: <?= json_encode($defaultNode) ?>,
-    token: <?= json_encode($_SESSION['jwt_token'] ?? '') ?>
+    token: <?= json_encode($_SESSION['jwt_token'] ?? '') ?>,
+    offline: <?= $isNodeOffline ? 'true' : 'false' ?>
   };
 </script>
 <script src="assets/js/crypto.js?v=<?= filemtime(__DIR__ . '/assets/js/crypto.js') ?>"></script>

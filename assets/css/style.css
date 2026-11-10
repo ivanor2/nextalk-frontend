@@ -2951,3 +2951,46 @@ footer a { color: var(--accent); font-size: 13px; }
 .add-member-dropdown.visible {
   display: block;
 }
+
+/* ── Offline Mode Banners & Pills ────────────────────────── */
+.offline-mode-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #FBBF24;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  margin: 6px 12px 10px 12px;
+  text-align: center;
+  animation: pulse-soft 3s infinite ease-in-out;
+}
+
+.chat-offline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.08));
+  border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+  color: #FDE68A;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 16px;
+  text-align: center;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.chat-offline-banner .offline-icon {
+  font-size: 14px;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.95; }
+  50% { opacity: 0.7; }
+}

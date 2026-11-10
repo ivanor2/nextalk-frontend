@@ -107,13 +107,13 @@ echo ================================================================
 echo           NexTalk Frontend — Меню запуска
 echo ================================================================
 echo.
-echo   [1] Локальный запуск (только на этом ПК, порт 8000)
+echo   [1] Локальный запуск (без прав админа, порт 8000)
 echo   [2] Запуск в открытый доступ через LocalTunnel (для интернета)
 echo   [3] Подключить LocalTunnel к работающему OSPanel (порт 80)
 echo   [4] Справка по опциям
 echo   [0] Выход
 echo.
-choice /C 12340 /T 10 /D 2 /M "Выберите действие (автовыбор [2] через 10 сек)"
+choice /C 12340 /T 5 /D 1 /M "Выберите действие (автозапуск [1] через 5 сек)"
 if !ERRORLEVEL! equ 1 goto run_local
 if !ERRORLEVEL! equ 2 goto run_tunnel_mode
 if !ERRORLEVEL! equ 3 goto run_ospanel_mode
@@ -141,18 +141,29 @@ exit /b !ERRORLEVEL!
 :start_local_server
 echo.
 echo ================================================================
-echo   NexTalk Frontend — Локальный запуск (порт: %PORT%)
+echo   NexTalk Frontend — Запуск (порт: %PORT%)
 echo ================================================================
 echo.
 
 set "PHP_CMD="
-where php >nul 2>&1
-if %ERRORLEVEL% equ 0 set "PHP_CMD=php"
+set "PHP_INI_ARG="
+
+if exist "%~dp0.php\php.exe" (
+    set "PHP_CMD=%~dp0.php\php.exe"
+    if exist "%~dp0.php\php.ini" set "PHP_INI_ARG=-c "%~dp0.php\php.ini""
+)
+
+if not defined PHP_CMD (
+    where php >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "PHP_CMD=php"
+)
+
 if not defined PHP_CMD if exist "C:\OSPanel\modules\php\PHP_8.3\php.exe" set "PHP_CMD=C:\OSPanel\modules\php\PHP_8.3\php.exe"
 if not defined PHP_CMD if exist "C:\OSPanel\modules\php\PHP_8.2\php.exe" set "PHP_CMD=C:\OSPanel\modules\php\PHP_8.2\php.exe"
 if not defined PHP_CMD if exist "C:\OSPanel\modules\php\PHP_8.1\php.exe" set "PHP_CMD=C:\OSPanel\modules\php\PHP_8.1\php.exe"
 if not defined PHP_CMD if exist "C:\OSPanel\modules\php\PHP_8.0\php.exe" set "PHP_CMD=C:\OSPanel\modules\php\PHP_8.0\php.exe"
 if not defined PHP_CMD if exist "C:\OSPanel\modules\php\PHP_7.4\php.exe" set "PHP_CMD=C:\OSPanel\modules\php\PHP_7.4\php.exe"
+
 if not defined PHP_CMD (
     for /d %%D in ("C:\OSPanel\modules\php\PHP_*") do (
         if exist "%%D\php.exe" set "PHP_CMD=%%D\php.exe"
@@ -160,16 +171,27 @@ if not defined PHP_CMD (
 )
 
 if not defined PHP_CMD (
-    echo [ОШИБКА] PHP не найден ни в PATH, ни в каталогах OSPanel!
-    echo Убедитесь, что PHP установлен.
+    echo [ИНФО] PHP не найден на ПК. Запускается настройка портативного PHP...
+    echo [ИНФО] Установка выполняется в папку проекта .php без прав администратора.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup-local-php.ps1"
+    if exist "%~dp0.php\php.exe" (
+        set "PHP_CMD=%~dp0.php\php.exe"
+        if exist "%~dp0.php\php.ini" set "PHP_INI_ARG=-c "%~dp0.php\php.ini""
+    )
+)
+
+if not defined PHP_CMD (
+    echo [ОШИБКА] Не удалось настроить PHP!
+    echo Проверьте подключение к интернету или установите PHP.
     pause
     exit /b 1
 )
 
 netstat -ano | findstr /C:":%PORT% " | findstr /I "LISTENING" >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    echo [ИНФО] Порт %PORT% уже кем-то слушается.
-    echo Сервер доступен по адресу: http://127.0.0.1:%PORT%
+    echo [ИНФО] Порт %PORT% уже занят.
+    echo Сервер уже доступен по адресу: http://localhost:%PORT%
+    start http://localhost:%PORT%
     echo.
     echo Нажмите любую клавишу для завершения...
     pause >nul
@@ -177,7 +199,7 @@ if %ERRORLEVEL% equ 0 (
 )
 
 echo [ИНФО] Запуск встроенного веб-сервера PHP (%PHP_CMD%)...
-start "NexTalk_Local_PHP_%PORT%" /MIN cmd /c ""%PHP_CMD%" -S 127.0.0.1:%PORT%"
+start "NexTalk_Local_PHP_%PORT%" /MIN cmd /c ""%PHP_CMD%" !PHP_INI_ARG! -S 0.0.0.0:%PORT%"
 timeout /t 2 /nobreak >nul 2>&1 || ping -n 3 127.0.0.1 >nul
 
 set "LOCAL_PID="
@@ -188,10 +210,10 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr /C:":%PORT% " ^| findstr /I "
 echo.
 echo ================================================================
 echo   NexTalk Frontend успешно запущен!
-echo   Локальный адрес: http://127.0.0.1:%PORT%
+echo   Локальный адрес: http://localhost:%PORT%
 echo.
-echo   Для входа в открытый доступ используйте: tunnel.bat
-echo   или запустите: run.bat --tunnel
+echo   Открытие в браузере...
+start http://localhost:%PORT%
 echo ================================================================
 echo.
 echo Нажмите любую клавишу для остановки сервера...

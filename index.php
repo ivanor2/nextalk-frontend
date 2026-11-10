@@ -6,11 +6,16 @@ $userId = $_SESSION['user_id'];
 $username = $_SESSION['username'];
 $displayName = $_SESSION['display_name'] ?? $username;
 
-// Получаем чаты пользователя через Node API
+// Получаем чаты пользователя через Node API (с fallback на LocalStore при недоступности узла)
+$isNodeOffline = false;
 $response = callNodeApi('GET', '/chats');
 $chats = [];
 if (isset($response['ok']) && $response['ok']) {
     $chats = $response['chats'] ?? [];
+    LocalStore::saveChats($userId, $chats);
+} else {
+    $chats = LocalStore::getChats($userId);
+    $isNodeOffline = true;
 }
 
 // Загружаем контакты для модального окна создания группы
@@ -109,6 +114,12 @@ require __DIR__ . '/templates/partials/head.php';
           ➕ Группа
         </button>
       </div>
+
+      <?php if ($isNodeOffline): ?>
+        <div class="offline-mode-pill">
+          <span>💾 Автономный режим: узел офлайн</span>
+        </div>
+      <?php endif; ?>
 
       <?php if (empty($chats)): ?>
         <div class="chat-list-empty">
@@ -306,7 +317,8 @@ window.APP_CONFIG = {
   displayName: <?= json_encode($displayName) ?>,
   defaultNode: <?= json_encode($defaultNode) ?>,
   totalUnread: <?= (int)$totalUnread ?>,
-  token: <?= json_encode($_SESSION['jwt_token'] ?? '') ?>
+  token: <?= json_encode($_SESSION['jwt_token'] ?? '') ?>,
+  offline: <?= $isNodeOffline ? 'true' : 'false' ?>
 };
 </script>
 <script src="assets/js/crypto.js?v=<?= filemtime(__DIR__ . '/assets/js/crypto.js') ?>"></script>

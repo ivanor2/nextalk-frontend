@@ -11,6 +11,7 @@ require_once __DIR__ . '/Config.php';
 require_once __DIR__ . '/ApiClient.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/Helpers.php';
+require_once __DIR__ . '/LocalStore.php';
 
 // ── Backward-Compatibility Procedural Functions ───────────
 
